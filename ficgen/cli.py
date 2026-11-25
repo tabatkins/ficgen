@@ -1,0 +1,499 @@
+"""Command-line interface for building the fiction archive and stamping dates."""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import sys
+from pathlib import Path
+
+import ao3py
+import kdl
+
+from . import t
+from .generator import BuildResult, generateSite
+from .importer import ImportOptions, importFromSource
+from .kdlMeta import StoryParseError, getBoolField, getStringField, parseKdlDocument
+from .models import SiteConfig
+from .parser import loadArchive
+from .scaffolder import InitOptions, initStory
+from .stamper import StampResult, defaultTodayDate, stampStories
+
+
+def _loadKdlConfig(configPath: Path) -> kdl.Document:
+    """Read an optional KDL site configuration file."""
+    try:
+        rawText = configPath.read_text(encoding="utf-8")
+    except OSError as exc:
+        msg = f"Failed to read config file {configPath}: {exc}"
+        raise StoryParseError(msg) from exc
+    return parseKdlDocument(rawText, sourceDesc=str(configPath))
+
+
+def _resolveDefaultPaths() -> tuple[Path, Path]:
+    """Resolve default stories/ and output directories from cwd or package layout."""
+    cwd = Path.cwd()
+    if (cwd / "stories").is_dir():
+        return (cwd / "stories", cwd)
+    parent = cwd.parent
+    if (parent / "stories").is_dir():
+        return (parent / "stories", parent)
+    return (cwd / "stories", cwd)
+
+
+def _buildArgParser() -> argparse.ArgumentParser:
+    """Create the CLI argument parser for building the site."""
+    defaultStories, defaultOutput = _resolveDefaultPaths()
+    parser = argparse.ArgumentParser(
+        prog="ficgen",
+        description="Build a static HTML fiction archive from Markdown story documents.",
+        epilog=(
+            "Subcommands:\n"
+            + "  ficgen [build] [options]        Build the static HTML archive (default)\n"
+            + "  ficgen new TITLE [options]      Initialize a new story directory (alias: init)\n"
+            + "  ficgen import SOURCE [options]  Import stories from AO3-compatible archives or EPUBs\n"
+            + "  ficgen stamp [options]          Stamp date into undated story/chapter KDL metadata blocks"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--stories",
+        type=Path,
+        default=defaultStories,
+        help=f"Directory containing story folders (default: {defaultStories})",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=defaultOutput,
+        help=f"Output directory for generated HTML/CSS/feed (default: {defaultOutput})",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="Optional KDL configuration file (auto-loads site.kdl if present).",
+    )
+    parser.add_argument(
+        "--title",
+        type=str,
+        default=None,
+        help="Archive title (overrides config file).",
+    )
+    parser.add_argument(
+        "--subtitle",
+        type=str,
+        default=None,
+        help="Archive subtitle shown on the index page.",
+    )
+    parser.add_argument(
+        "--author",
+        type=str,
+        default=None,
+        help="Default author name for stories and Atom feed.",
+    )
+    parser.add_argument(
+        "--base-url",
+        type=str,
+        default=None,
+        help="Canonical base URL for the Atom feed (e.g. https://example.com/fic/).",
+    )
+    parser.add_argument(
+        "--drafts",
+        action="store_true",
+        default=False,
+        help="Include unpublished (published false) stories and chapters.",
+    )
+    return parser
+
+
+def _stampArgParser() -> argparse.ArgumentParser:
+    """Create the CLI argument parser for the `stamp` subcommand."""
+    defaultStories, _ = _resolveDefaultPaths()
+    parser = argparse.ArgumentParser(
+        prog="ficgen stamp",
+        description='Stamp `date "YYYY-MM-DD"` into KDL metadata blocks of undated story and chapter files.',
+    )
+    parser.add_argument(
+        "targets",
+        nargs="*",
+        type=Path,
+        help="Optional file paths, story directories, or story slugs to stamp (defaults to all stories).",
+    )
+    parser.add_argument(
+        "--stories",
+        type=Path,
+        default=defaultStories,
+        help=f"Directory containing story folders (default: {defaultStories})",
+    )
+    parser.add_argument(
+        "--date",
+        type=str,
+        default=None,
+        help="ISO-8601 date to stamp (default: today's date, YYYY-MM-DD).",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="Overwrite existing date values.",
+    )
+    parser.add_argument(
+        "--drafts",
+        action="store_true",
+        default=False,
+        help="Also stamp files marked published false.",
+    )
+    parser.add_argument(
+        "-n",
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="Show which files would be stamped without modifying them.",
+    )
+    return parser
+
+
+def _newArgParser() -> argparse.ArgumentParser:
+    """Create the CLI argument parser for the `new` / `init` subcommand."""
+    defaultStories, _ = _resolveDefaultPaths()
+    parser = argparse.ArgumentParser(
+        prog="ficgen new",
+        description="Initialize a new story directory with KDL metadata and starter Markdown files.",
+    )
+    parser.add_argument(
+        "title",
+        type=str,
+        help="Title of the new story.",
+    )
+    parser.add_argument(
+        "--slug",
+        type=str,
+        default="",
+        help="Directory / URL slug (default: slugified from title).",
+    )
+    parser.add_argument(
+        "-m",
+        "--multi",
+        action="store_true",
+        default=False,
+        help="Create a multi-chapter story (story.kdl + ch1.md) instead of a one-shot index.md.",
+    )
+    parser.add_argument(
+        "--chapters",
+        type=int,
+        default=1,
+        help="Number of starter chapter files to create (implies --multi if > 1).",
+    )
+    parser.add_argument(
+        "--published",
+        action="store_true",
+        default=False,
+        help="Mark starter file(s) as published (default creates them as `published false` drafts).",
+    )
+    parser.add_argument(
+        "--date",
+        type=str,
+        default="",
+        help="Optional ISO-8601 publication date (YYYY-MM-DD).",
+    )
+    parser.add_argument(
+        "--fandom",
+        action="append",
+        default=[],
+        help="Fandom tag (repeatable).",
+    )
+    parser.add_argument(
+        "--category",
+        action="append",
+        default=[],
+        help="Relationship category such as F/F (repeatable).",
+    )
+    parser.add_argument(
+        "--relationship",
+        action="append",
+        default=[],
+        help="Relationship / ship tag (repeatable).",
+    )
+    parser.add_argument(
+        "--character",
+        action="append",
+        default=[],
+        help="Character tag (repeatable).",
+    )
+    parser.add_argument(
+        "--tag",
+        action="append",
+        default=[],
+        help="Additional freeform tag (repeatable).",
+    )
+    parser.add_argument(
+        "--stories",
+        type=Path,
+        default=defaultStories,
+        help=f"Directory containing story folders (default: {defaultStories})",
+    )
+    return parser
+
+
+def _importArgParser() -> argparse.ArgumentParser:
+    """Create the CLI argument parser for the `import` subcommand."""
+    defaultStories, _ = _resolveDefaultPaths()
+    parser = argparse.ArgumentParser(
+        prog="ficgen import",
+        description="Import one or more works from AO3, AO3-compatible archives, or downloaded AO3 EPUBs.",
+    )
+    parser.add_argument(
+        "sources",
+        nargs="+",
+        type=str,
+        help="AO3/mirror work URL(s), numeric work ID(s), or local .epub file path(s).",
+    )
+    parser.add_argument(
+        "--archive",
+        type=str,
+        default=ao3py.DEFAULT_BASE_URL,
+        help=f"Archive base URL for bare numeric work IDs (default: {ao3py.DEFAULT_BASE_URL}).",
+    )
+    parser.add_argument(
+        "--slug",
+        type=str,
+        default="",
+        help="Custom story directory/URL slug (only valid when importing a single work).",
+    )
+    parser.add_argument(
+        "--stories",
+        type=Path,
+        default=defaultStories,
+        help=f"Destination stories directory (default: {defaultStories})",
+    )
+    parser.add_argument(
+        "--draft",
+        action="store_true",
+        default=False,
+        help="Mark imported story/chapters as `published false`.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="Overwrite existing story directory if it already exists.",
+    )
+    parser.add_argument(
+        "--cookie",
+        type=str,
+        default="",
+        help="Optional Cookie header value (e.g. session cookie for restricted works).",
+    )
+    return parser
+
+
+def buildConfigFromArgs(argv: t.Sequence[str] | None = None) -> SiteConfig:
+    """Parse CLI arguments and optional KDL site config into a SiteConfig."""
+    parser = _buildArgParser()
+    args = parser.parse_args(argv)
+
+    storiesDir: Path = args.stories
+    outputDir: Path = args.output
+    configPath: Path | None = args.config
+    if configPath is None:
+        candidate = storiesDir.parent / "site.kdl"
+        if candidate.is_file():
+            configPath = candidate
+
+    configDoc = kdl.Document()
+    configSource = "<config>"
+    if configPath is not None:
+        configDoc = _loadKdlConfig(configPath)
+        configSource = str(configPath)
+
+    def _strOpt(cliVal: str | None, kdlKey: str, fallback: str) -> str:
+        if cliVal is not None:
+            return cliVal
+        kdlVal = getStringField(configDoc, kdlKey, sourceDesc=configSource)
+        return kdlVal or fallback
+
+    kdlDrafts = getBoolField(configDoc, "include-drafts", default=False, sourceDesc=configSource)
+    includeDrafts = bool(args.drafts) or kdlDrafts
+
+    return SiteConfig(
+        storiesDir=storiesDir,
+        outputDir=outputDir,
+        title=_strOpt(args.title, "title", "Fiction Archive"),
+        subtitle=_strOpt(args.subtitle, "subtitle", ""),
+        author=_strOpt(args.author, "author", ""),
+        baseUrl=_strOpt(args.base_url, "base-url", "https://example.com/"),
+        includeDrafts=includeDrafts,
+    )
+
+
+def buildArchive(config: SiteConfig) -> BuildResult:
+    """Load stories from disk and generate the static archive."""
+    archive = loadArchive(config)
+    return generateSite(archive)
+
+
+def _printStampSummary(result: StampResult) -> None:
+    """Print per-file actions and a concise summary for `ficgen stamp`."""
+    for entry in result.entries:
+        match entry.action:
+            case "stamped":
+                print(f"Stamped {entry.dateValue}: {entry.path}")
+            case "would_stamp":
+                print(f"Would stamp {entry.dateValue}: {entry.path}")
+            case "skipped_existing":
+                print(f"Skipped (already dated): {entry.path}")
+            case "skipped_draft":
+                print(f"Skipped (draft): {entry.path}")
+
+    verb = "Would stamp" if result.dryRun else "Stamped"
+    print(
+        f"{verb} {result.stampedCount} file(s)"
+        + f" ({result.skippedExistingCount} already dated, {result.skippedDraftCount} draft(s) skipped).",
+    )
+
+
+def _runStamp(argv: t.Sequence[str]) -> int:
+    """Execute the `ficgen stamp` subcommand."""
+    parser = _stampArgParser()
+    args = parser.parse_args(argv)
+    dateValue: str = args.date if args.date is not None else defaultTodayDate()
+    result = stampStories(
+        storiesDir=args.stories,
+        dateValue=dateValue,
+        targets=args.targets,
+        force=bool(args.force),
+        includeDrafts=bool(args.drafts),
+        dryRun=bool(args.dry_run),
+    )
+    _printStampSummary(result)
+    return 0
+
+
+def _runNew(argv: t.Sequence[str]) -> int:
+    """Execute the `ficgen new` / `ficgen init` subcommand."""
+    parser = _newArgParser()
+    args = parser.parse_args(argv)
+    options = InitOptions(
+        storiesDir=args.stories,
+        title=args.title,
+        slug=args.slug,
+        multiChapter=bool(args.multi),
+        chapterCount=int(args.chapters),
+        published=bool(args.published),
+        dateValue=args.date,
+        fandoms=tuple(args.fandom),
+        categories=tuple(args.category),
+        relationships=tuple(args.relationship),
+        characters=tuple(args.character),
+        tags=tuple(args.tag),
+    )
+    result = initStory(options)
+    print(f"Initialized story '{options.title.strip()}' in {result.storyDir}:")
+    for createdPath in result.createdFiles:
+        print(f"  {createdPath}")
+    return 0
+
+
+def _makeCookieFetcher(baseFetcher: ao3py.Fetcher, extraCookie: str) -> ao3py.Fetcher:
+    """Return a fetcher that appends an extra Cookie header to every request."""
+
+    def _wrapped(url: str, headers: t.Mapping[str, str] | None = None) -> ao3py.FetchResponse:
+        merged = dict(headers) if headers else {}
+        existing = merged.get("Cookie", "").strip()
+        merged["Cookie"] = f"{existing} {extraCookie}".strip() if existing else extraCookie
+        return baseFetcher(url, merged)
+
+    return _wrapped
+
+
+def _runImport(argv: t.Sequence[str]) -> int:
+    """Execute the `ficgen import` subcommand."""
+    parser = _importArgParser()
+    args = parser.parse_args(argv)
+    if args.slug and len(args.sources) > 1:
+        msg = "--slug can only be used when importing a single work."
+        raise StoryParseError(msg)
+
+    logger = logging.getLogger("ficgen.importer")
+    previousFetcher = ao3py.getFetcher()
+    installedCustom = False
+    if previousFetcher is ao3py.defaultFetch or args.cookie:
+        base: ao3py.Fetcher = previousFetcher
+        if args.cookie:
+            base = _makeCookieFetcher(base, args.cookie)
+
+        def _logRetry(event: ao3py.RetryEvent) -> None:
+            statusDesc = f"HTTP {event.response.status}" if event.response is not None else str(event.error)
+            logger.warning(
+                "Retry %d in %.1fs after %s",
+                event.attempt,
+                event.delaySeconds,
+                statusDesc,
+            )
+
+        ao3py.setFetcher(ao3py.withCache(ao3py.withRetry(base, onRetry=_logRetry)))
+        installedCustom = True
+
+    try:
+        for source in args.sources:
+            options = ImportOptions(
+                storiesDir=args.stories,
+                archiveUrl=args.archive,
+                slug=args.slug,
+                asDraft=bool(args.draft),
+                force=bool(args.force),
+            )
+            result = importFromSource(source, options)
+            chapterNote = f" ({result.chapterCount} chapters)" if result.chapterCount > 1 else ""
+            print(f"Imported '{result.title}'{chapterNote} -> {result.storyDir}")
+            for createdPath in result.createdFiles:
+                print(f"  {createdPath}")
+    finally:
+        if installedCustom:
+            if previousFetcher is ao3py.defaultFetch:
+                ao3py.resetFetcher()
+            else:
+                ao3py.setFetcher(previousFetcher)
+
+    return 0
+
+
+def _configureLogging() -> None:
+    """Attach a stderr warning handler to the ficgen logger if none is configured."""
+    pkgLogger = logging.getLogger("ficgen")
+    if not pkgLogger.handlers:
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+        pkgLogger.addHandler(handler)
+    if pkgLogger.level == logging.NOTSET:
+        pkgLogger.setLevel(logging.WARNING)
+
+
+def main(argv: t.Sequence[str] | None = None) -> int:
+    """Entry point for the ficgen CLI."""
+    _configureLogging()
+    rawArgs = list(sys.argv[1:] if argv is None else argv)
+    try:
+        if rawArgs and rawArgs[0] == "stamp":
+            return _runStamp(rawArgs[1:])
+        if rawArgs and rawArgs[0] in {"new", "init"}:
+            return _runNew(rawArgs[1:])
+        if rawArgs and rawArgs[0] == "import":
+            return _runImport(rawArgs[1:])
+        buildArgs = rawArgs[1:] if rawArgs and rawArgs[0] == "build" else rawArgs
+        config = buildConfigFromArgs(buildArgs)
+        result = buildArchive(config)
+    except StoryParseError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    draftNote = " (including drafts)" if config.includeDrafts else ""
+    print(
+        f"Built {result.storyCount} stories"
+        + f" ({result.chapterPageCount} chapter pages,"
+        + f" {result.taxonomyPageCount} tag pages,"
+        + f" {result.feedEntryCount} feed entries){draftNote}"
+        + f" -> {result.outputDir}",
+    )
+    return 0

@@ -1,0 +1,153 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ficgen"
+dynamic = ["version"]
+description = "Static site generator for personal fiction archives using Markdown and KDL metadata"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    {name = "Tab Atkins-Bittner"},
+]
+dependencies = [
+    "ao3py>=0.1.0",
+    "jinja2>=3.1",
+    "kdl-py>=1.2",
+    "linkify-it-py>=2.0",
+    "markdown-it-py>=3.0",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Internet :: WWW/HTTP :: Site Management",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/tabatkins/ficgen"
+Repository = "https://github.com/tabatkins/ficgen"
+
+[project.scripts]
+ficgen = "ficgen.cli:main"
+
+[tool.setuptools.dynamic]
+version = {file = "semver.txt"}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ficgen*"]
+
+[tool.setuptools.package-data]
+ficgen = ["py.typed", "templates/*.html", "templates/*.xml", "static/*.css"]
+
+[tool.black]
+line-length = 120
+target-version = ["py312"]
+
+[tool.pylint."MESSAGES CONTROL"]
+disable = [
+    "invalid-name",                      # camelCase style
+    "line-too-long",                     # black handles line lengths
+    "no-else-break",                     # stylistic preference
+    "no-else-continue",                  # ditto
+    "no-else-raise",                     # ditto
+    "no-else-return",                    # ditto
+    "superfluous-parens",                # stylistic preference
+    "too-few-public-methods",
+    "too-many-arguments",
+    "too-many-boolean-expressions",
+    "too-many-branches",
+    "too-many-instance-attributes",
+    "too-many-lines",
+    "too-many-locals",
+    "too-many-nested-blocks",
+    "too-many-return-statements",
+    "too-many-statements",
+    "useless-import-alias",              # explicit PEP 484 re-exports in __init__.py
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+ignore = [
+    "E501",                              # black handles line lengths
+    "F811",                              # @overload redefinitions
+    "N802",                              # camelCase style
+    "N803",
+    "N806",
+    "N812",
+    "N815",
+    "N816",
+    "N999",
+    "S101",                              # assert is used for mypy narrowing
+    "PLC0414",                           # explicit PEP 484 re-exports in __init__.py
+    "PLR0911",
+    "PLR0912",
+    "PLR0913",
+    "PLR0915",
+    "PLR2004",
+    "PLR5501",
+    "ISC003",                            # prefer explicit `+` over implicit multiline concat
+    "SIM102",                            # stylistic readability preferences
+    "SIM103",
+    "SIM108",
+    "SIM114",
+]
+select = [
+    "ANN",
+    "E",
+    "F",
+    "N",
+    "W",
+    "I",
+    "YTT",
+    "S",
+    "PL",
+    "COM",
+    "C4",
+    "EM",
+    "EXE",
+    "INP",
+    "T20",
+    "RSE",
+    "ISC",
+    "SIM",
+    "RUF",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"ficgen/cli.py" = ["T201"]
+"release.py" = ["S603", "S607", "T201"]  # release script prints progress and invokes git/build/twine
+"tests/*.py" = ["INP001"]                # pytest test directory intentionally omits __init__.py
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+
+[tool.ruff.lint.flake8-implicit-str-concat]
+allow-multiline = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.check-manifest]
+ignore = [
+    "CONTRIBUTING.md",
+    "lint",
+    "mypy.ini",
+    "release.py",
+    "requirements-dev.txt",
+    "requirements.txt",
+    "tests/**",
+]

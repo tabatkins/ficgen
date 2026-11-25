@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>{{ archive.config.title }}</title>
+  {% if archive.config.subtitle %}
+  <subtitle>{{ archive.config.subtitle }}</subtitle>
+  {% endif %}
+  <id>{{ baseUrl }}</id>
+  <link href="{{ baseUrl }}" rel="alternate" type="text/html"/>
+  <link href="{{ baseUrl }}feed.xml" rel="self" type="application/atom+xml"/>
+  <updated>{{ feedUpdated | atom_time }}</updated>
+  <generator>ficgen</generator>
+  {% for entry in archive.feedEntries %}
+  <entry>
+    <title>{{ entry.title }}</title>
+    <id>{{ entry.entryId }}</id>
+    <link href="{{ entry.url }}" rel="alternate" type="text/html"/>
+    <updated>{{ entry.updated | atom_time }}</updated>
+    <published>{{ entry.published | atom_time }}</published>
+    <author>
+      <name>{{ entry.author or defaultAuthor }}</name>
+    </author>
+    {% for cat in entry.categories %}
+    <category term="{{ cat }}" label="{{ cat }}"/>
+    {% endfor %}
+    {% if entry.summaryText %}
+    <summary type="text">{{ entry.summaryText }}</summary>
+    {% endif %}
+    <content type="html">{{ entry.contentHtml }}</content>
+  </entry>
+  {% endfor %}
+</feed>

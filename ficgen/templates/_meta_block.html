@@ -1,0 +1,90 @@
+{% set fandomItems = archive.taxonomyItems(story, 'fandoms') %}
+{% set categoryItems = archive.taxonomyItems(story, 'categories') %}
+{% set relationshipItems = archive.taxonomyItems(story, 'relationships') %}
+{% set characterItems = archive.taxonomyItems(story, 'characters') %}
+{% set tagItems = archive.taxonomyItems(story, 'tags') %}
+<dl class="story-meta">
+  {% if story.rating %}
+  <dt>Rating</dt>
+  <dd>{{ story.rating }}</dd>
+  {% endif %}
+
+  {% if story.warnings %}
+  <dt>Warnings</dt>
+  <dd>
+    <ul class="meta-inline-list">
+      {% for warning in story.warnings %}
+      <li><span class="tag-pill tag-warning">{{ warning }}</span></li>
+      {% endfor %}
+    </ul>
+  </dd>
+  {% endif %}
+
+  {% if categoryItems %}
+  <dt>Category</dt>
+  <dd>
+    <ul class="meta-inline-list">
+      {% for item in categoryItems %}
+      <li><a class="badge badge-category" href="{{ rootPrefix }}{{ item.relUrl }}">{{ item.name }}</a></li>
+      {% endfor %}
+    </ul>
+  </dd>
+  {% endif %}
+
+  {% if fandomItems %}
+  <dt>Fandoms</dt>
+  <dd>
+    <ul class="meta-inline-list">
+      {% for item in fandomItems %}
+      <li><a class="tag-pill tag-character" href="{{ rootPrefix }}{{ item.relUrl }}">{{ item.name }}</a></li>
+      {% endfor %}
+    </ul>
+  </dd>
+  {% endif %}
+
+  {% if relationshipItems %}
+  <dt>Relationships</dt>
+  <dd>
+    <ul class="meta-inline-list">
+      {% for item in relationshipItems %}
+      <li><a class="tag-pill tag-relationship" href="{{ rootPrefix }}{{ item.relUrl }}">{{ item.name }}</a></li>
+      {% endfor %}
+    </ul>
+  </dd>
+  {% endif %}
+
+  {% if characterItems %}
+  <dt>Characters</dt>
+  <dd>
+    <ul class="meta-inline-list">
+      {% for item in characterItems %}
+      <li><a class="tag-pill tag-character" href="{{ rootPrefix }}{{ item.relUrl }}">{{ item.name }}</a></li>
+      {% endfor %}
+    </ul>
+  </dd>
+  {% endif %}
+
+  {% if tagItems %}
+  <dt>Additional Tags</dt>
+  <dd>
+    <ul class="meta-inline-list">
+      {% for item in tagItems %}
+      <li><a class="tag-pill tag-freeform" href="{{ rootPrefix }}{{ item.relUrl }}">{{ item.name }}</a></li>
+      {% endfor %}
+    </ul>
+  </dd>
+  {% endif %}
+
+  <dt>Stats</dt>
+  <dd class="meta-stats-row">
+    <span><strong>Words:</strong> {{ story.wordCount | format_num }}</span>
+    <span><strong>Chapters:</strong> {{ story.chapterCountDisplay }}</span>
+    <span><strong>Status:</strong> {{ story.statusLabel }}</span>
+    {% if story.hasExplicitDate %}
+    <span><strong>Published:</strong> <time datetime="{{ story.date.strftime('%Y-%m-%d') }}">{{ story.date.strftime('%Y-%m-%d') }}</time></span>
+    {% if story.updated.date() != story.date.date() %}
+    <span><strong>Updated:</strong> <time datetime="{{ story.updated.strftime('%Y-%m-%d') }}">{{ story.updated.strftime('%Y-%m-%d') }}</time></span>
+    {% endif %}
+    {% endif %}
+  </dd>
+</dl>

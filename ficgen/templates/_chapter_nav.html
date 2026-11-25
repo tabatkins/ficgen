@@ -1,0 +1,33 @@
+<nav class="chapter-nav{% if navPosition == 'bottom' %} chapter-nav-bottom{% endif %}" aria-label="Chapter navigation">
+  <div class="chapter-nav-group">
+    {% if prevChapter %}
+    <a class="chapter-nav-link" href="{{ prevChapter.filename }}">&larr; Previous</a>
+    {% else %}
+    <span class="chapter-nav-disabled">&larr; Previous</span>
+    {% endif %}
+
+    <details class="chapter-picker">
+      <summary>{{ chapter.displayTitle }} ({{ chapterIndex + 1 }}/{{ story.chapters | length }})</summary>
+      <ol>
+        {% for item in story.chapters %}
+        <li>
+          <a href="{{ item.filename }}"{% if item.number == chapter.number %} aria-current="page"{% endif %}>
+            <span>{{ item.displayTitle }}{% if not item.published %} [Draft]{% endif %}</span>
+            <span class="browse-count">{{ item.wordCount | format_num }}w</span>
+          </a>
+        </li>
+        {% endfor %}
+      </ol>
+    </details>
+  </div>
+
+  <div class="chapter-nav-group">
+    <a class="chapter-nav-link" href="./">Chapter Index</a>
+    <a class="chapter-nav-link" href="all.html">Entire Work</a>
+    {% if nextChapter %}
+    <a class="chapter-nav-link" href="{{ nextChapter.filename }}">Next &rarr;</a>
+    {% else %}
+    <span class="chapter-nav-disabled">Next &rarr;</span>
+    {% endif %}
+  </div>
+</nav>

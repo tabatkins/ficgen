@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block content %}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <a href="{{ rootPrefix }}">All Stories</a>
+  <span class="breadcrumb-sep" aria-hidden="true">/</span>
+  <a href="./">{{ story.title }}</a>
+  <span class="breadcrumb-sep" aria-hidden="true">/</span>
+  <span>{{ chapter.displayTitle }}</span>
+</nav>
+
+{% set navPosition = 'top' %}
+{% include "_chapter_nav.html" %}
+
+<article class="work">
+  <header class="chapter-header">
+    <p class="chapter-work-title"><a href="./">{{ story.title }}</a></p>
+    <h1>
+      {{ chapter.displayTitle }}
+      {% if not chapter.published %}<span class="badge badge-draft">Draft</span>{% endif %}
+    </h1>
+    <p class="chapter-meta">
+      {{ chapter.wordCount | format_num }} words{% if chapter.hasExplicitDate %} &middot; <time datetime="{{ chapter.date.strftime('%Y-%m-%d') }}">{{ chapter.date.strftime('%Y-%m-%d') }}</time>{% endif %}
+    </p>
+
+    <details class="work-meta-disclosure">
+      <summary>Story details &amp; tags</summary>
+      {% include "_meta_block.html" %}
+    </details>
+
+    {% if chapter.summaryHtml %}
+    <section class="work-summary" aria-labelledby="chapter-summary-heading">
+      <h2 id="chapter-summary-heading">Chapter Summary</h2>
+      {{ chapter.summaryHtml | safe }}
+    </section>
+    {% endif %}
+
+    {% if chapter.notesHtml %}
+    <aside class="author-notes" aria-labelledby="chapter-notes-heading">
+      <h2 id="chapter-notes-heading">Notes</h2>
+      {{ chapter.notesHtml | safe }}
+      {% if chapter.endnotesHtml %}
+      <p class="endnotes-pointer">See the <a href="#endnotes">end of the chapter</a> for more notes.</p>
+      {% endif %}
+    </aside>
+    {% elif chapter.endnotesHtml %}
+    <p class="endnotes-pointer">See the <a href="#endnotes">end of the chapter</a> for notes.</p>
+    {% endif %}
+  </header>
+
+  <div class="prose">
+    {{ chapter.bodyHtml | safe }}
+  </div>
+
+  {% if chapter.endnotesHtml %}
+  <aside class="author-notes end-notes" id="endnotes" aria-labelledby="chapter-endnotes-heading">
+    <h2 id="chapter-endnotes-heading">End Notes</h2>
+    {{ chapter.endnotesHtml | safe }}
+  </aside>
+  {% endif %}
+</article>
+
+{% set navPosition = 'bottom' %}
+{% include "_chapter_nav.html" %}
+{% endblock %}

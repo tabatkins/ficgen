@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<header class="browse-header">
+  <h1>Browse Archive</h1>
+  <p>Explore stories by fandom, category, relationship, character, or tag.</p>
+  {% if sections %}
+  <nav class="browse-jump" aria-label="Taxonomy sections">
+    {% for kind, label, _ in sections %}
+    <a href="#{{ kind }}">{{ label }}</a>
+    {% endfor %}
+  </nav>
+  {% endif %}
+</header>
+
+{% if sections %}
+  {% for kind, label, buckets in sections %}
+  <section class="browse-section" id="{{ kind }}" aria-labelledby="heading-{{ kind }}">
+    <h2 id="heading-{{ kind }}">{{ label }}</h2>
+    <ul class="browse-list">
+      {% for bucket in buckets %}
+      <li>
+        <a href="{{ kind }}/{{ bucket.item.slug }}.html">
+          <span>{{ bucket.item.name }}</span>
+          <span class="browse-count">{{ bucket.stories | length }}</span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endfor %}
+{% else %}
+<p class="empty-state">No tags found yet.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <a href="{{ rootPrefix }}">All Stories</a>
+  <span class="breadcrumb-sep" aria-hidden="true">/</span>
+  <a href="../">Browse</a>
+  <span class="breadcrumb-sep" aria-hidden="true">/</span>
+  <a href="../#{{ bucket.kind }}">{{ bucket.label }}</a>
+</nav>
+
+<header class="browse-header">
+  <h1>
+    <span class="browse-kind-label">{{ bucket.singularLabel }}</span>
+    {{ bucket.item.name }}
+  </h1>
+  <p>{{ bucket.stories | length }} {{ 'work' if bucket.stories | length == 1 else 'works' }}</p>
+</header>
+
+<section aria-label="Matching stories">
+  <ol class="story-list">
+    {% for story in bucket.stories %}
+    <li>
+      {% include "_story_card.html" %}
+    </li>
+    {% endfor %}
+  </ol>
+</section>
+{% endblock %}

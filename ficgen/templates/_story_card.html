@@ -1,0 +1,76 @@
+{% set fandomItems = archive.taxonomyItems(story, 'fandoms') %}
+{% set categoryItems = archive.taxonomyItems(story, 'categories') %}
+{% set relationshipItems = archive.taxonomyItems(story, 'relationships') %}
+{% set characterItems = archive.taxonomyItems(story, 'characters') %}
+{% set tagItems = archive.taxonomyItems(story, 'tags') %}
+<article class="story-entry">
+  <header class="story-entry-header">
+    <h2 class="story-entry-title">
+      <a href="{{ rootPrefix }}{{ story.slug }}/">{{ story.title }}</a>
+    </h2>
+    <div class="story-entry-badges">
+      {% for item in categoryItems %}
+      <a class="badge badge-category" href="{{ rootPrefix }}{{ item.relUrl }}">{{ item.name }}</a>
+      {% endfor %}
+      {% if story.isMultiChapter and not story.complete %}
+      <span class="badge badge-wip">In Progress</span>
+      {% endif %}
+      {% if not story.published or story.hasDraftChapters %}
+      <span class="badge badge-draft">Draft</span>
+      {% endif %}
+    </div>
+  </header>
+
+  {% if fandomItems %}
+  <p class="story-entry-fandoms">
+    {% for item in fandomItems %}<a href="{{ rootPrefix }}{{ item.relUrl }}">{{ item.name }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
+  </p>
+  {% endif %}
+
+  {% if story.warnings or relationshipItems or characterItems or tagItems %}
+  <ul class="tag-list">
+    {% for warning in story.warnings %}
+    <li><span class="tag-pill tag-warning">{{ warning }}</span></li>
+    {% endfor %}
+    {% for item in relationshipItems %}
+    <li><a class="tag-pill tag-relationship" href="{{ rootPrefix }}{{ item.relUrl }}">{{ item.name }}</a></li>
+    {% endfor %}
+    {% for item in characterItems %}
+    <li><a class="tag-pill tag-character" href="{{ rootPrefix }}{{ item.relUrl }}">{{ item.name }}</a></li>
+    {% endfor %}
+    {% for item in tagItems %}
+    <li><a class="tag-pill tag-freeform" href="{{ rootPrefix }}{{ item.relUrl }}">{{ item.name }}</a></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if story.summaryHtml %}
+  <div class="story-entry-summary">
+    {{ story.summaryHtml | safe }}
+  </div>
+  {% endif %}
+
+  <footer class="story-entry-footer">
+    <div class="story-entry-stats">
+      <span>{{ story.wordCount | format_num }} words</span>
+      {% if story.isMultiChapter %}
+      <span>Chapters: {{ story.chapterCountDisplay }}</span>
+      {% else %}
+      <span>One-shot</span>
+      {% endif %}
+      {% if story.hasExplicitDate %}
+      <span>Published <time datetime="{{ story.date.strftime('%Y-%m-%d') }}">{{ story.date.strftime('%Y-%m-%d') }}</time></span>
+      {% if story.updated.date() != story.date.date() %}
+      <span>Updated <time datetime="{{ story.updated.strftime('%Y-%m-%d') }}">{{ story.updated.strftime('%Y-%m-%d') }}</time></span>
+      {% endif %}
+      {% endif %}
+    </div>
+    {% if story.isMultiChapter and story.chapters %}
+    <div class="story-entry-actions">
+      <a href="{{ rootPrefix }}{{ story.slug }}/{{ story.chapters[0].filename }}">Start Reading</a>
+      <a href="{{ rootPrefix }}{{ story.slug }}/all.html">Entire Work</a>
+      <a href="{{ rootPrefix }}{{ story.slug }}/">Chapter Index</a>
+    </div>
+    {% endif %}
+  </footer>
+</article>

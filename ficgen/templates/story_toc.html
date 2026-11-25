@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block content %}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <a href="{{ rootPrefix }}">&larr; All Stories</a>
+</nav>
+
+<article class="work">
+  <header class="work-header">
+    <h1>
+      {{ story.title }}
+      {% if not story.published %}<span class="badge badge-draft">Draft</span>{% endif %}
+    </h1>
+    {% if story.author %}
+    <p class="work-byline">by {{ story.author }}</p>
+    {% endif %}
+
+    {% include "_meta_block.html" %}
+
+    {% if story.summaryHtml %}
+    <section class="work-summary" aria-labelledby="summary-heading">
+      <h2 id="summary-heading">Summary</h2>
+      {{ story.summaryHtml | safe }}
+    </section>
+    {% endif %}
+
+    {% if story.notesHtml %}
+    <aside class="author-notes" aria-labelledby="notes-heading">
+      <h2 id="notes-heading">Notes</h2>
+      {{ story.notesHtml | safe }}
+    </aside>
+    {% endif %}
+
+    {% if story.chapters %}
+    <div class="work-actions">
+      <a class="btn btn-primary" href="{{ story.chapters[0].filename }}">Start Reading ({{ story.chapters[0].displayTitle }})</a>
+      <a class="btn" href="all.html">Read Entire Work</a>
+    </div>
+    {% endif %}
+  </header>
+
+  <section class="chapter-index" aria-labelledby="chapters-heading">
+    <h2 id="chapters-heading">Chapters</h2>
+    <ol class="chapter-list">
+      {% for chapter in story.chapters %}
+      <li>
+        <div class="chapter-list-row">
+          <a class="chapter-list-title" href="{{ chapter.filename }}">
+            {{ chapter.displayTitle }}
+            {% if not chapter.published %}<span class="badge badge-draft">Draft</span>{% endif %}
+          </a>
+          <span class="chapter-list-meta">
+            {{ chapter.wordCount | format_num }} words{% if chapter.hasExplicitDate %} &middot; <time datetime="{{ chapter.date.strftime('%Y-%m-%d') }}">{{ chapter.date.strftime('%Y-%m-%d') }}</time>{% endif %}
+          </span>
+        </div>
+        {% if chapter.summaryHtml %}
+        <div class="chapter-list-summary">
+          {{ chapter.summaryHtml | safe }}
+        </div>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+  </section>
+
+  {% if story.endnotesHtml %}
+  <aside class="author-notes end-notes" id="endnotes" aria-labelledby="endnotes-heading">
+    <h2 id="endnotes-heading">End Notes</h2>
+    {{ story.endnotesHtml | safe }}
+  </aside>
+  {% endif %}
+</article>
+
+<nav class="work-footer-nav" aria-label="Story footer">
+  <a href="{{ rootPrefix }}">&larr; Back to Archive</a>
+  {% if story.chapters %}
+  <a href="all.html">Entire Work</a>
+  {% endif %}
+</nav>
+{% endblock %}

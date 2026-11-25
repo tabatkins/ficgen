@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<header class="archive-intro">
+  <h1>{{ archive.config.title }}</h1>
+  {% if archive.config.subtitle %}
+  <p class="archive-subtitle">{{ archive.config.subtitle }}</p>
+  {% endif %}
+  <p class="archive-stats">
+    <span>{{ archive.stories | length }} {{ 'story' if archive.stories | length == 1 else 'stories' }}</span>
+    <span>{{ archive.totalWords | format_num }} words</span>
+    {% if archive.taxonomies['fandoms'] %}
+    <span>{{ archive.taxonomies['fandoms'] | length }} {{ 'fandom' if archive.taxonomies['fandoms'] | length == 1 else 'fandoms' }}</span>
+    {% endif %}
+  </p>
+</header>
+
+{% if archive.stories %}
+<section aria-label="Stories">
+  <ol class="story-list">
+    {% for story in archive.stories %}
+    <li>
+      {% include "_story_card.html" %}
+    </li>
+    {% endfor %}
+  </ol>
+</section>
+{% else %}
+<p class="empty-state">No published stories yet.</p>
+{% endif %}
+{% endblock %}

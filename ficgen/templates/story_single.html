@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block content %}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <a href="{{ rootPrefix }}">&larr; All Stories</a>
+</nav>
+
+<article class="work">
+  <header class="work-header">
+    <h1>
+      {{ story.title }}
+      {% if not story.published %}<span class="badge badge-draft">Draft</span>{% endif %}
+    </h1>
+    {% if story.author %}
+    <p class="work-byline">by {{ story.author }}</p>
+    {% endif %}
+
+    {% include "_meta_block.html" %}
+
+    {% if story.summaryHtml %}
+    <section class="work-summary" aria-labelledby="summary-heading">
+      <h2 id="summary-heading">Summary</h2>
+      {{ story.summaryHtml | safe }}
+    </section>
+    {% endif %}
+
+    {% if story.notesHtml %}
+    <aside class="author-notes" aria-labelledby="notes-heading">
+      <h2 id="notes-heading">Notes</h2>
+      {{ story.notesHtml | safe }}
+      {% if story.endnotesHtml %}
+      <p class="endnotes-pointer">See the <a href="#endnotes">end of the story</a> for more notes.</p>
+      {% endif %}
+    </aside>
+    {% elif story.endnotesHtml %}
+    <p class="endnotes-pointer">See the <a href="#endnotes">end of the story</a> for notes.</p>
+    {% endif %}
+  </header>
+
+  <div class="prose">
+    {{ story.bodyHtml | safe }}
+  </div>
+
+  {% if story.endnotesHtml %}
+  <aside class="author-notes end-notes" id="endnotes" aria-labelledby="endnotes-heading">
+    <h2 id="endnotes-heading">End Notes</h2>
+    {{ story.endnotesHtml | safe }}
+  </aside>
+  {% endif %}
+</article>
+
+<nav class="work-footer-nav" aria-label="Story footer">
+  <a href="{{ rootPrefix }}">&larr; Back to Archive</a>
+  <a href="#content">&uarr; Top</a>
+</nav>
+{% endblock %}
