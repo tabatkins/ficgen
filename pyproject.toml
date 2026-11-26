@@ -148,4 +148,5 @@ ignore = [
     "requirements-dev.txt",
     "requirements.txt",
     "tests/**",
+    "docs/**",
 ]
