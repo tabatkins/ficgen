@@ -17,7 +17,7 @@ Requires Python 3.12+.
 pip install ficgen
 ```
 
-Or install globally as a CLI tool with `pipx`:
+Or install globally as a CLI tool with [`pipx`](https://pipx.pypa.io/latest/how-to/install-pipx.html):
 
 ```sh
 pipx install ficgen
