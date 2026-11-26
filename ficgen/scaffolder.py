@@ -187,6 +187,7 @@ def _buildDefaultSiteKdl() -> str:
         + 'base-url "https://example.com/"\n'
         + f'// stories "{DEFAULT_STORIES_DIR_NAME}"\n'
         + "// include-drafts false\n"
+        + "// local-browsing true\n"
     )
 
 

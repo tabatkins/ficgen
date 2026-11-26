@@ -74,5 +74,19 @@
       });
     })();
   </script>
+  {% if archive.config.localBrowsing %}
+  <script>
+    if (location.protocol === "file:") {
+      for (const a of document.querySelectorAll("a[href]")) {
+        const href = a.getAttribute("href");
+        if (!href || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(href)) continue;
+        const rewritten = href
+          .replace(/^([^?#]*\/)(?=[?#]|$)/, "$1index.html")
+          .replace(/^([^?#]*(?:^|\/)\.\.?)(?=[?#]|$)/, "$1/index.html");
+        if (rewritten !== href) a.setAttribute("href", rewritten);
+      }
+    }
+  </script>
+  {% endif %}
 </body>
 </html>

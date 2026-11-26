@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from html.parser import HTMLParser
 from pathlib import Path
 from xml.parsers import expat
@@ -462,3 +463,65 @@ def test_site_kdl_configures_stories_dir_across_cli_commands(
     badCfgPath = tmp_path / "bad.kdl"
     badCfgPath.write_text("stories 123\n", encoding="utf-8")
     assert main(["--config", str(badCfgPath)]) == 1
+
+
+def test_file_protocol_link_rewriter_script_present_and_clean_html_urls(tmp_path: Path) -> None:
+    """Every HTML page keeps clean directory URLs and embeds the `file:` index.html rewriter."""
+    storiesDir = _createSampleStories(tmp_path / "_stories")
+    outDir = tmp_path / "out"
+    generateSite(loadArchive(SiteConfig(storiesDir=storiesDir, outputDir=outDir)))
+
+    htmlFiles = list(outDir.rglob("*.html"))
+    assert htmlFiles
+
+    schemeRe = re.compile(r"^(?:[a-z][a-z0-9+.-]*:|//)", re.IGNORECASE)
+    trailingSlashRe = re.compile(r"^([^?#]*/)(?=[?#]|$)")
+    dotDirRe = re.compile(r"^([^?#]*(?:^|/)\.\.?)(?=[?#]|$)")
+
+    for htmlFile in htmlFiles:
+        text = htmlFile.read_text(encoding="utf-8")
+        assert 'if (location.protocol === "file:")' in text
+        # Static HTML links should not be polluted with explicit index.html suffixes.
+        assert 'href="./index.html"' not in text
+        assert 'href="../index.html"' not in text
+        assert 'href="browse/index.html"' not in text
+
+        # Simulating the script's rewrite turns every directory href into a direct file target.
+        collector = _LinkCollector()
+        collector.feed(text)
+        for href in collector.hrefs:
+            if not href or schemeRe.match(href) or href.startswith("#"):
+                continue
+            rewritten = trailingSlashRe.sub(r"\1index.html", href)
+            rewritten = dotDirRe.sub(r"\1/index.html", rewritten)
+            targetPart = rewritten.split("#", 1)[0].split("?", 1)[0]
+            resolved = (htmlFile.parent / targetPart).resolve()
+            assert resolved.is_file(), (
+                f"Rewritten href {href!r} -> {rewritten!r} in {htmlFile.relative_to(outDir)} "
+                + f"did not point directly to a file: {resolved}"
+            )
+
+
+def test_site_kdl_local_browsing_option_toggles_file_url_script(tmp_path: Path) -> None:
+    """`local-browsing` in `site.kdl` defaults to true and omits the `file:` script when false."""
+    assert SiteConfig().localBrowsing is True
+
+    storiesDir = _createSampleStories(tmp_path / "_stories")
+    cfgPath = tmp_path / "site.kdl"
+    cfgPath.write_text("local-browsing false\n", encoding="utf-8")
+
+    cfg = buildConfigFromArgs(["--stories", str(storiesDir), "--config", str(cfgPath)])
+    assert cfg.localBrowsing is False
+
+    outDisabled = tmp_path / "out-disabled"
+    assert main(["--stories", str(storiesDir), "--output", str(outDisabled), "--config", str(cfgPath)]) == 0
+    htmlFiles = list(outDisabled.rglob("*.html"))
+    assert htmlFiles
+    for htmlFile in htmlFiles:
+        assert 'location.protocol === "file:"' not in htmlFile.read_text(encoding="utf-8")
+
+    cfgPath.write_text("local-browsing true\n", encoding="utf-8")
+    outEnabled = tmp_path / "out-enabled"
+    assert main(["--stories", str(storiesDir), "--output", str(outEnabled), "--config", str(cfgPath)]) == 0
+    for htmlFile in outEnabled.rglob("*.html"):
+        assert 'location.protocol === "file:"' in htmlFile.read_text(encoding="utf-8")

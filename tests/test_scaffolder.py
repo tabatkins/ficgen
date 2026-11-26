@@ -180,6 +180,7 @@ def test_cli_init_scaffolds_empty_folder_and_builds_cleanly(
     assert "Lorem ipsum" in oneShotMd.read_text(encoding="utf-8")
     assert "Lorem ipsum" in ch1Md.read_text(encoding="utf-8")
     assert "// include-drafts false" in (archiveDir / "site.kdl").read_text(encoding="utf-8")
+    assert "// local-browsing true" in (archiveDir / "site.kdl").read_text(encoding="utf-8")
     assert '// stories "_stories"' in (archiveDir / "site.kdl").read_text(encoding="utf-8")
     assert "// planned-chapters" in storyKdl.read_text(encoding="utf-8")
 

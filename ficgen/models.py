@@ -85,6 +85,7 @@ class SiteConfig:
     author: str = ""
     baseUrl: str = "https://example.com/"
     includeDrafts: bool = False
+    localBrowsing: bool = True
 
     def normalizedBaseUrl(self) -> str:
         """Return baseUrl guaranteed to end with a single slash."""

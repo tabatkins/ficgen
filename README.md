@@ -72,9 +72,10 @@ author "Alex Rivera"
 base-url "https://example.com/fic/"
 // stories "_stories"
 // include-drafts false
+// local-browsing true
 ```
 
-Relative `stories` paths (aliases: `stories-dir`, `stories-directory`) are resolved relative to the directory containing `site.kdl`.
+Relative `stories` paths (aliases: `stories-dir`, `stories-directory`) are resolved relative to the directory containing `site.kdl`. When `local-browsing` is `true` (the default), each HTML page includes a tiny script that rewrites relative directory links to `index.html` only when viewed over `file://`; set `local-browsing false` to omit it.
 
 #### Generated Output
 

@@ -396,6 +396,7 @@ def buildConfigFromArgs(argv: t.Sequence[str] | None = None) -> SiteConfig:
 
     kdlDrafts = getBoolField(configDoc, "include-drafts", default=False, sourceDesc=configSource)
     includeDrafts = bool(args.drafts) or kdlDrafts
+    localBrowsing = getBoolField(configDoc, "local-browsing", default=True, sourceDesc=configSource)
 
     return SiteConfig(
         storiesDir=storiesDir,
@@ -405,6 +406,7 @@ def buildConfigFromArgs(argv: t.Sequence[str] | None = None) -> SiteConfig:
         author=_strOpt(args.author, "author", ""),
         baseUrl=_strOpt(args.base_url, "base-url", "https://example.com/"),
         includeDrafts=includeDrafts,
+        localBrowsing=localBrowsing,
     )
 
 
