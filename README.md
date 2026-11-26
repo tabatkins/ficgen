@@ -83,7 +83,7 @@ Relative `stories` and `css` paths (aliases: `stories-dir`, `stories-directory`;
 
 **Fonts:** Set `font-serif`, `font-sans`, and `font-mono` (or group them in a `fonts { serif "..."; sans "..."; mono "..." }` block) to any built-in preset name—`system-ui`, `transitional`, `old-style`, `humanist`, `geometric-humanist`, `classical-humanist`, `neogrotesque`, `mono-slab-serif`, `mono-code`, `industrial`, `rounded-sans`, `slab-serif`, `antique`, `didone`, `handwritten`—or supply a custom CSS font stack (either as a single CSS string like `"'Literata', Georgia, serif"` or as multiple KDL string arguments like `font-serif "Literata" "Georgia"`). Custom stacks without an ultimate generic fallback automatically have `serif`, `sans-serif`, or `monospace` appended; placing a generic fallback keyword before another font fails the build with an error.
 
-**Custom CSS:** Ficgen's built-in stylesheet is wrapped in `@layer ficgen`. If a `site.css` file exists in the site root (next to `site.kdl` or `_stories/`), it is automatically appended *outside* `@layer ficgen` so unlayered rules easily override defaults (any leading `@import` rules in your CSS are hoisted to the top of `style.css`). Set `css "path/to/custom.css"` to use a different file, `css false` to ignore `site.css`, and `mode="replace"` (or `css-mode "replace"`) to replace the built-in stylesheet completely instead of appending.
+**Custom CSS:** Stylesheets use explicit CSS cascade layers declared via `@layer ficgen, site, work, chapter;`. Ficgen's built-in CSS lives in `@layer ficgen`. If a `site.css` file exists in the site root (next to `site.kdl` or `_stories/`), it is automatically wrapped in `@layer site` and appended to `style.css` (with any leading `@import` rules hoisted and scoped via `layer(site)`). Set `css "path/to/custom.css"` to use a different file, `css false` to ignore `site.css`, and `mode="replace"` (or `css-mode "replace"`) to replace `@layer ficgen` with your own stylesheet.
 
 #### Generated Output
 
@@ -340,6 +340,14 @@ All three support full Markdown formatting and auto-linked URLs.
 - **Dashes & ellipses:** Prose `--` and `---` convert to em-dashes (`—`), numeric ranges like `1990--1995` convert to en-dashes (`–`), and `...` converts to `…`.
 - **Auto-linked URLs:** Bare `http://` and `https://` URLs are automatically turned into hyperlinks in prose and notes.
 - **Scene breaks:** Standard Markdown horizontal rules (`---`, `* * *`, etc.) render as centered `✦ ✦ ✦` ornaments.
+
+### Work Skins & Per-Chapter CSS
+
+Style an individual story (or a single chapter of a multi-chapter story) without affecting site chrome or other works:
+
+- **External files:** Place `work.css` inside `_stories/<slug>/` for work-wide styles, and `<chapter-stem>.css` (e.g. `ch1.css` next to `ch1.md`) for chapter-specific styles.
+- **Inline CSS blocks:** Include one or more ```` ```css ... ``` ```` fenced blocks directly inside `index.md` or `chN.md`; they are stripped from story prose and appended after `work.css` / `chN.css`.
+- **Automatic layering & scoping:** Work CSS is wrapped in `@layer work { @scope (article.work) { ... } }` and chapter CSS in `@layer chapter { @scope (article.work) { ... } }` (or `@scope (#ch-N)` per chapter on `all.html`), so simple selectors only target story content while cleanly overriding `@layer ficgen` and `@layer site`. Any leading `@import` rules are hoisted in order with `layer(work)` / `layer(chapter)`.
 
 ### Word Counts, Taxonomies, Atom Feed & Theming
 

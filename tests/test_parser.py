@@ -62,6 +62,24 @@ def test_parse_document_ignores_tags_inside_code_fence() -> None:
     assert "<endnotes>literal example</endnotes>" in doc.bodyMd
 
 
+def test_parse_document_extracts_inline_css_blocks() -> None:
+    """Inline ```css fences are extracted into cssBlocks and stripped from story prose."""
+    raw = (
+        "# Styled Story\n\n"
+        + '```metadata\ntags "work-skin"\n```\n\n'
+        + "```css\n"
+        + "p { color: navy; }\n"
+        + "```\n\n"
+        + "Prose paragraph.\n\n"
+        + "```css\n"
+        + "em { letter-spacing: 0.05em; }\n"
+        + "```\n"
+    )
+    doc = parseMarkdownDocument(raw)
+    assert doc.cssBlocks == ("p { color: navy; }", "em { letter-spacing: 0.05em; }")
+    assert doc.bodyMd == "Prose paragraph."
+
+
 def test_load_archive_with_story_kdl_and_draft_filtering(tmp_path: Path) -> None:
     """Multi-chapter stories read whole-work metadata from story.kdl and filter drafts."""
     multiDir = tmp_path / "multi"

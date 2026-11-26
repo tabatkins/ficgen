@@ -9,6 +9,11 @@
   {% endif %}
   <link rel="alternate" type="application/atom+xml" title="{{ archive.config.title }} Atom Feed" href="{{ rootPrefix }}feed.xml">
   <link rel="stylesheet" href="{{ rootPrefix }}style.css">
+  {% if pageCss %}
+  <style>
+{{ pageCss | safe }}
+  </style>
+  {% endif %}
   <script>
     (function () {
       try {

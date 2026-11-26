@@ -634,9 +634,11 @@ def test_custom_font_stack_appends_generic_fallback_and_validates_position(
 
 
 def test_default_stylesheet_wrapped_in_ficgen_layer() -> None:
-    """Packaged style.css wraps all built-in rules in a `@layer ficgen` block."""
+    """Packaged style.css declares layer order and wraps all built-in rules in `@layer ficgen`."""
     cssText = resources.files("ficgen").joinpath("static/style.css").read_text(encoding="utf-8")
+    assert "\n@layer ficgen, site, work, chapter;\n" in cssText
     assert "\n@layer ficgen {\n" in cssText
+    assert cssText.index("@layer ficgen, site, work, chapter;") < cssText.index("@layer ficgen {")
     assert cssText.rstrip().endswith("}")
 
 
@@ -645,34 +647,40 @@ def test_custom_css_auto_discovery_append_replace_and_errors(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Custom CSS supports auto-discovered site.css, custom paths, append/replace modes, and @import hoisting."""
+    """Custom CSS supports auto-discovered site.css, @layer site, @import layer(site), append/replace, and errors."""
     siteDir = tmp_path / "site"
     _createSampleStories(siteDir / "_stories")
     (siteDir / "site.css").write_text(
-        '@import url("https://example.com/custom-font.css");\n\n' + ":root {\n  --accent: rebeccapurple;\n}\n",
+        '@import url("https://example.com/custom-font.css");\n'
+        + '@import "https://example.com/reset.css" layer(reset) screen;\n\n'
+        + ":root {\n  --accent: rebeccapurple;\n}\n",
         encoding="utf-8",
     )
 
-    # Auto-discovers site.css in site root (even without site.kdl) and appends outside @layer ficgen.
+    # Auto-discovers site.css in site root (even without site.kdl), hoists @imports with layer(site), wraps body in @layer site.
     monkeypatch.chdir(siteDir)
     assert main(["build"]) == 0
     appendedCss = (siteDir / "style.css").read_text(encoding="utf-8")
-    layerDeclPos = appendedCss.index("@layer ficgen;")
-    importPos = appendedCss.index('@import url("https://example.com/custom-font.css");')
-    layerStart = appendedCss.index("@layer ficgen {")
-    overridePos = appendedCss.index(":root {\n  --accent: rebeccapurple;")
+    layerDeclPos = appendedCss.index("@layer ficgen, site, work, chapter;")
+    import1Pos = appendedCss.index('@import url("https://example.com/custom-font.css") layer(site);')
+    import2Pos = appendedCss.index('@import "https://example.com/reset.css" layer(site.reset) screen;')
+    ficgenLayerPos = appendedCss.index("@layer ficgen {")
+    siteLayerPos = appendedCss.index("@layer site {")
+    overridePos = appendedCss.index("--accent: rebeccapurple;")
     assert layerDeclPos == 0
-    assert layerDeclPos < importPos < layerStart < overridePos
-    # Ensure the custom override starts outside the @layer ficgen closing brace.
-    assert appendedCss[layerStart:overridePos].rstrip().endswith("\n}")
+    assert layerDeclPos < import1Pos < import2Pos < ficgenLayerPos < siteLayerPos < overridePos
+    assert appendedCss.count("@layer ficgen, site, work, chapter;") == 1
 
-    # `css mode="replace"` (or `css-mode "replace"`) replaces ficgen's built-in CSS completely.
+    # `css mode="replace"` replaces @layer ficgen with @layer site while preserving layer order for work/chapter skins.
     cfgPath = siteDir / "site.kdl"
     cfgPath.write_text('css mode="replace"\n', encoding="utf-8")
     assert main(["build"]) == 0
     replacedCss = (siteDir / "style.css").read_text(encoding="utf-8")
     assert "@layer ficgen" not in replacedCss
-    assert replacedCss == (siteDir / "site.css").read_text(encoding="utf-8")
+    assert replacedCss.startswith("@layer site, work, chapter;\n")
+    assert '@import url("https://example.com/custom-font.css") layer(site);' in replacedCss
+    assert "@layer site {" in replacedCss
+    assert "--accent: rebeccapurple;" in replacedCss
 
     # Custom location in site.kdl resolved relative to site.kdl, with `css-mode "append"`.
     assetsDir = siteDir / "_assets"
@@ -681,9 +689,9 @@ def test_custom_css_auto_discovery_append_replace_and_errors(
     cfgPath.write_text('css "_assets/theme.css"\ncss-mode "append"\n', encoding="utf-8")
     assert main(["build"]) == 0
     customLocCss = (siteDir / "style.css").read_text(encoding="utf-8")
-    assert "@layer ficgen;" not in customLocCss
+    assert "@layer ficgen, site, work, chapter;" in customLocCss
     assert "@layer ficgen {" in customLocCss
-    assert "body { background: ivory; }" in customLocCss
+    assert "@layer site {\n  body { background: ivory; }\n}" in customLocCss
     assert "rebeccapurple" not in customLocCss
 
     # `css false` disables auto-discovered site.css.
@@ -691,6 +699,7 @@ def test_custom_css_auto_discovery_append_replace_and_errors(
     assert main(["build"]) == 0
     disabledCss = (siteDir / "style.css").read_text(encoding="utf-8")
     assert "@layer ficgen {" in disabledCss
+    assert "@layer site {" not in disabledCss
     assert "rebeccapurple" not in disabledCss
 
     # Error cases: missing custom CSS path, invalid mode, replace without CSS, and self-overwrite.
@@ -709,3 +718,110 @@ def test_custom_css_auto_discovery_append_replace_and_errors(
     cfgPath.write_text('css "style.css"\n', encoding="utf-8")
     assert main(["build"]) == 1
     assert "same as the generated output stylesheet" in capsys.readouterr().err
+
+
+def test_work_skins_and_chapter_css_layers_imports_inline_and_scope(tmp_path: Path) -> None:
+    """Work/chapter external CSS files and inline ```css blocks layer, scope, and hoist @imports cleanly."""
+    storiesDir = tmp_path / "_stories"
+
+    # Single-doc story with both work.css and an inline ```css block, each having an @import.
+    oneShot = storiesDir / "neon-rain"
+    oneShot.mkdir(parents=True)
+    (oneShot / "work.css").write_text(
+        '@import "https://example.com/work-a.css";\n\n' + "p {\n  color: cyan;\n}\n",
+        encoding="utf-8",
+    )
+    (oneShot / "index.md").write_text(
+        "# Neon Rain\n\n"
+        + '```metadata\ndate "2026-10-01"\n```\n\n'
+        + "```css\n"
+        + '@import "https://example.com/work-b.css" screen;\n'
+        + "em { color: magenta; }\n"
+        + "```\n\n"
+        + "Rain fell on neon glass.\n",
+        encoding="utf-8",
+    )
+
+    # Multi-chapter story with work.css, ch1.css + inline css, and a custom-named chapter file with matching .css.
+    multi = storiesDir / "layered-saga"
+    multi.mkdir(parents=True)
+    (multi / "story.kdl").write_text('title "Layered Saga"\n', encoding="utf-8")
+    (multi / "work.css").write_text(
+        '@import "https://example.com/saga-work.css";\n' + "h1 { letter-spacing: 0.08em; }\n",
+        encoding="utf-8",
+    )
+    (multi / "ch1.css").write_text(
+        '@import "https://example.com/ch1-ext.css" supports(display: grid);\n' + ".special { font-weight: 700; }\n",
+        encoding="utf-8",
+    )
+    (multi / "ch1.md").write_text(
+        '```metadata\nchapter 1\ndate "2026-10-02"\n```\n\n'
+        + "```css\n"
+        + '@import "https://example.com/ch1-inline.css";\n'
+        + "blockquote { border-color: gold; }\n"
+        + "```\n\n"
+        + "Chapter one words.\n",
+        encoding="utf-8",
+    )
+    (multi / "epilogue.css").write_text("p { font-style: italic; }\n", encoding="utf-8")
+    (multi / "epilogue.md").write_text(
+        '```metadata\nchapter 2\ndate "2026-10-03"\n```\n\n' + "Chapter two words.\n",
+        encoding="utf-8",
+    )
+
+    # Plain story with no CSS at all should not emit any <style> tag.
+    plain = storiesDir / "plain-tale"
+    plain.mkdir(parents=True)
+    (plain / "index.md").write_text('# Plain Tale\n\n```metadata\ndate "2026-10-04"\n```\n\nHello.\n', encoding="utf-8")
+
+    outDir = tmp_path / "out"
+    archive = loadArchive(SiteConfig(storiesDir=storiesDir, outputDir=outDir))
+    generateSite(archive)
+
+    # Plain story and archive index have no <style> tag.
+    assert "<style>" not in (outDir / "index.html").read_text(encoding="utf-8")
+    assert "<style>" not in (outDir / "plain-tale" / "index.html").read_text(encoding="utf-8")
+
+    # Single-doc story: CSS block is stripped from prose & word count, hoisted imports keep order, scoped to article.work.
+    oneShotStory = next(item for item in archive.stories if item.slug == "neon-rain")
+    assert oneShotStory.wordCount == 5
+    oneShotHtml = (outDir / "neon-rain" / "index.html").read_text(encoding="utf-8")
+    assert "<pre><code" not in oneShotHtml
+    workA = oneShotHtml.index('@import "https://example.com/work-a.css" layer(work);')
+    workB = oneShotHtml.index('@import "https://example.com/work-b.css" layer(work) screen;')
+    workLayer = oneShotHtml.index("@layer work {\n  @scope (article.work) {")
+    cyanPos = oneShotHtml.index("color: cyan;")
+    magentaPos = oneShotHtml.index("em { color: magenta; }")
+    assert oneShotHtml.index("@layer ficgen, site, work, chapter;") < workA < workB < workLayer < cyanPos < magentaPos
+
+    # Multi-chapter TOC gets work skin only (no chapter CSS).
+    tocHtml = (outDir / "layered-saga" / "index.html").read_text(encoding="utf-8")
+    assert '@import "https://example.com/saga-work.css" layer(work);' in tocHtml
+    assert "@layer work {\n  @scope (article.work) {" in tocHtml
+    assert "@layer chapter" not in tocHtml
+
+    # Chapter 1 gets work + ch1.css + ch1 inline CSS in exact order, both scoped to article.work.
+    ch1Html = (outDir / "layered-saga" / "ch1.html").read_text(encoding="utf-8")
+    sagaImp = ch1Html.index('@import "https://example.com/saga-work.css" layer(work);')
+    ch1ExtImp = ch1Html.index('@import "https://example.com/ch1-ext.css" layer(chapter) supports(display: grid);')
+    ch1InImp = ch1Html.index('@import "https://example.com/ch1-inline.css" layer(chapter);')
+    ch1WorkLayer = ch1Html.index("@layer work {\n  @scope (article.work) {")
+    ch1ChapLayer = ch1Html.index("@layer chapter {\n  @scope (article.work) {")
+    extRulePos = ch1Html.index(".special { font-weight: 700; }")
+    inlineRulePos = ch1Html.index("blockquote { border-color: gold; }")
+    assert sagaImp < ch1ExtImp < ch1InImp < ch1WorkLayer < ch1ChapLayer < extRulePos < inlineRulePos
+    assert "font-style: italic;" not in ch1Html
+
+    # Chapter 2 (`epilogue.md`) picks up `epilogue.css`.
+    ch2Html = (outDir / "layered-saga" / "ch2.html").read_text(encoding="utf-8")
+    assert "@layer work {\n  @scope (article.work) {" in ch2Html
+    assert "@layer chapter {\n  @scope (article.work) {\n    p { font-style: italic; }\n  }\n}" in ch2Html
+    assert ".special" not in ch2Html
+
+    # Entire Work (`all.html`) scopes work CSS to article.work and each chapter's CSS to its `#ch-N` section.
+    allHtml = (outDir / "layered-saga" / "all.html").read_text(encoding="utf-8")
+    assert "@layer work {\n  @scope (article.work) {" in allHtml
+    assert "@layer chapter {" in allHtml
+    assert "@scope (#ch-1) {" in allHtml
+    assert "@scope (#ch-2) {" in allHtml
+    assert allHtml.index("saga-work.css") < allHtml.index("ch1-ext.css") < allHtml.index("ch1-inline.css")

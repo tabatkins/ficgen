@@ -38,6 +38,9 @@ _TITLE_LINE_RE: t.Final[re.Pattern[str]] = re.compile(r"^#\s+(.+?)\s*$")
 _METADATA_FENCE_RE: t.Final[re.Pattern[str]] = re.compile(
     r"(?ms)^```metadata(?:[ \t]+kdl)?[ \t]*\n(.*?)\n```[ \t]*\n?",
 )
+_CSS_FENCE_RE: t.Final[re.Pattern[str]] = re.compile(
+    r"(?ms)^```css[ \t]*\n(.*?)^```[ \t]*\n?",
+)
 _LEADING_KDL_FENCE_RE: t.Final[re.Pattern[str]] = re.compile(
     r"(?ms)\A[ \t\n]*```kdl[ \t]*\n(.*?)\n```[ \t]*\n?",
 )
@@ -62,6 +65,7 @@ class ParsedDocument:
     notesMd: str
     endnotesMd: str
     bodyMd: str
+    cssBlocks: tuple[str, ...] = ()
 
 
 def _extractSpecialBlocks(text: str) -> tuple[str, list[str], list[str], list[str]]:
@@ -126,8 +130,18 @@ def parseMarkdownDocument(rawText: str, sourceDesc: str = "<markdown>") -> Parse
         return ""
 
     withoutMeta = _METADATA_FENCE_RE.sub(_consumeMetadata, remaining)
+
+    cssBlocks: list[str] = []
+
+    def _consumeCss(match: re.Match[str]) -> str:
+        cssText = match.group(1).strip()
+        if cssText:
+            cssBlocks.append(cssText)
+        return ""
+
+    withoutCss = _CSS_FENCE_RE.sub(_consumeCss, withoutMeta)
     metadata = mergeDocuments(*metaDocs)
-    bodyRaw, summaries, notes, endnotes = _extractSpecialBlocks(withoutMeta)
+    bodyRaw, summaries, notes, endnotes = _extractSpecialBlocks(withoutCss)
 
     metaTitle = getStringField(metadata, "title", sourceDesc=sourceDesc)
     if metaTitle:
@@ -152,6 +166,7 @@ def parseMarkdownDocument(rawText: str, sourceDesc: str = "<markdown>") -> Parse
         notesMd="\n\n".join(notes).strip(),
         endnotesMd="\n\n".join(endnotes).strip(),
         bodyMd=bodyRaw.strip(),
+        cssBlocks=tuple(cssBlocks),
     )
 
 
@@ -179,11 +194,24 @@ def _humanizeSlug(slug: str) -> str:
     return " ".join(word.capitalize() for word in slug.replace("_", "-").split("-") if word)
 
 
+def _readOptionalCssFile(cssPath: Path) -> str | None:
+    """Read a UTF-8 CSS file if it exists and is non-empty."""
+    if not cssPath.is_file():
+        return None
+    try:
+        text = cssPath.read_text(encoding="utf-8")
+    except OSError as exc:
+        msg = f"Failed to read stylesheet {cssPath}: {exc}"
+        raise StoryParseError(msg) from exc
+    return text if text.strip() else None
+
+
 def _loadChapter(
     chapterPath: Path,
     fallbackNumber: int,
     storyTitle: str,
     renderer: MarkdownRenderer,
+    workCssPath: Path,
 ) -> Chapter:
     """Load and render a single chapter Markdown file."""
     sourceDesc = str(chapterPath)
@@ -209,6 +237,10 @@ def _loadChapter(
     wordCount = countWords(bodyHtml)
     summaryText = stripHtmlTags(summaryHtml) if summaryHtml else makeExcerpt(bodyHtml)
 
+    chapterCssPath = chapterPath.with_suffix(".css")
+    chapterCssFile = _readOptionalCssFile(chapterCssPath) if chapterCssPath != workCssPath else None
+    chapterCssBlocks = tuple(block for block in (chapterCssFile, *parsed.cssBlocks) if block)
+
     return Chapter(
         number=number,
         slug=f"ch{number}",
@@ -228,6 +260,7 @@ def _loadChapter(
         extraRelationships=getListField(meta, "relationships", "relationship", "ships", sourceDesc=sourceDesc),
         extraCharacters=getListField(meta, "characters", "character", sourceDesc=sourceDesc),
         extraTags=getListField(meta, "tags", "tag", "additional-tags", sourceDesc=sourceDesc),
+        cssBlocks=chapterCssBlocks,
     )
 
 
@@ -271,6 +304,8 @@ def loadStory(storyDir: Path, config: SiteConfig, renderer: MarkdownRenderer) ->
     """Load a story directory into a Story model, or return None if unpublished."""
     slug = storyDir.name
     storyKdlPath, indexMdPath, chapterFiles = discoverStoryFiles(storyDir)
+    workCssPath = storyDir / "work.css"
+    workCssFile = _readOptionalCssFile(workCssPath)
 
     isMultiChapter = bool(chapterFiles)
     if not isMultiChapter:
@@ -310,6 +345,7 @@ def loadStory(storyDir: Path, config: SiteConfig, renderer: MarkdownRenderer) ->
         bodyHtml = renderer.render(indexDoc.bodyMd)
         wordCount = countWords(bodyHtml)
         summaryText = stripHtmlTags(summaryHtml) if summaryHtml else makeExcerpt(bodyHtml)
+        workCssBlocks = tuple(block for block in (workCssFile, *indexDoc.cssBlocks) if block)
 
         return Story(
             slug=slug,
@@ -337,9 +373,11 @@ def loadStory(storyDir: Path, config: SiteConfig, renderer: MarkdownRenderer) ->
             wordCount=wordCount,
             chapters=(),
             sourceDir=storyDir,
+            cssBlocks=workCssBlocks,
         )
 
     # Multi-chapter story: prefer whole-work story.kdl, falling back to index.md or first chapter.
+    indexCssBlocks: tuple[str, ...] = ()
     if storyKdlPath is not None:
         metaSourcePath = storyKdlPath
         sourceDesc = str(storyKdlPath)
@@ -357,6 +395,7 @@ def loadStory(storyDir: Path, config: SiteConfig, renderer: MarkdownRenderer) ->
         storySummaryMd = indexDoc.summaryMd or indexDoc.bodyMd
         storyNotesMd = indexDoc.notesMd
         storyEndnotesMd = indexDoc.endnotesMd
+        indexCssBlocks = indexDoc.cssBlocks
     else:
         metaSourcePath = chapterFiles[0]
         sourceDesc = str(chapterFiles[0])
@@ -372,7 +411,8 @@ def loadStory(storyDir: Path, config: SiteConfig, renderer: MarkdownRenderer) ->
         return None
 
     loadedChapters = [
-        _loadChapter(chapterPath, idx + 1, storyTitle, renderer) for idx, chapterPath in enumerate(chapterFiles)
+        _loadChapter(chapterPath, idx + 1, storyTitle, renderer, workCssPath)
+        for idx, chapterPath in enumerate(chapterFiles)
     ]
     loadedChapters.sort(key=lambda chapter: (chapter.number, chapter.sourcePath.name))
 
@@ -433,6 +473,7 @@ def loadStory(storyDir: Path, config: SiteConfig, renderer: MarkdownRenderer) ->
     endnotesHtml = renderer.render(storyEndnotesMd)
     summaryText = stripHtmlTags(summaryHtml) if summaryHtml else includedChapters[0].summaryText
     totalWords = sum(chapter.wordCount for chapter in includedChapters)
+    workCssBlocks = tuple(block for block in (workCssFile, *indexCssBlocks) if block)
 
     return Story(
         slug=slug,
@@ -460,6 +501,7 @@ def loadStory(storyDir: Path, config: SiteConfig, renderer: MarkdownRenderer) ->
         wordCount=totalWords,
         chapters=includedChapters,
         sourceDir=storyDir,
+        cssBlocks=workCssBlocks,
     )
 
 

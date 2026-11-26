@@ -26,6 +26,12 @@ from .models import (
 _FONT_SERIF_RE: t.Final[re.Pattern[str]] = re.compile(r"(?m)^([ \t]*--font-serif:[ \t]*)([^;\n]+)(;)")
 _FONT_SANS_RE: t.Final[re.Pattern[str]] = re.compile(r"(?m)^([ \t]*--font-sans:[ \t]*)([^;\n]+)(;)")
 _FONT_MONO_RE: t.Final[re.Pattern[str]] = re.compile(r"(?m)^([ \t]*--font-mono:[ \t]*)([^;\n]+)(;)")
+_LAYER_ORDER_FULL: t.Final[str] = "@layer ficgen, site, work, chapter;"
+_LAYER_ORDER_REPLACE: t.Final[str] = "@layer site, work, chapter;"
+_LAYER_ORDER_LINE_RE: t.Final[re.Pattern[str]] = re.compile(r"(?m)^@layer ficgen, site, work, chapter;\n+")
+_IMPORT_LAYER_NAMED_RE: t.Final[re.Pattern[str]] = re.compile(r"^layer\(\s*([^)]+?)\s*\)", re.IGNORECASE)
+_IMPORT_LAYER_ANON_RE: t.Final[re.Pattern[str]] = re.compile(r"^layer(?=$|[\s;])", re.IGNORECASE)
+_STYLE_CLOSE_RE: t.Final[re.Pattern[str]] = re.compile(r"(?i)</(style)(?=[\s>/])")
 
 
 @dataclass(slots=True)
@@ -135,10 +141,75 @@ def _scanCssRuleEnd(cssText: str, start: int) -> int:
     return length
 
 
+def _indentCss(cssText: str, spaces: int = 2) -> str:
+    """Indent non-empty lines of CSS text by the given number of spaces."""
+    prefix = " " * spaces
+    return "\n".join(prefix + line if line.strip() else "" for line in cssText.strip().splitlines())
+
+
+def _wrapLayerBlock(layerName: str, cssBody: str) -> str:
+    """Wrap CSS rules inside `@layer <layerName> { ... }`."""
+    return f"@layer {layerName} {{\n{_indentCss(cssBody, 2)}\n}}"
+
+
+def _wrapScopedBlock(scopeSelector: str, cssBody: str) -> str:
+    """Wrap CSS rules inside `@scope (<scopeSelector>) { ... }`."""
+    return f"@scope ({scopeSelector}) {{\n{_indentCss(cssBody, 2)}\n}}"
+
+
+def _skipImportTarget(importRule: str, start: int) -> int:
+    """Return the index immediately past the <url> or <string> target of an @import rule."""
+    pos = start
+    length = len(importRule)
+    while pos < length and importRule[pos].isspace():
+        pos += 1
+    if pos >= length:
+        return pos
+    if importRule[pos] in {"'", '"'}:
+        return _skipCssQuoted(importRule, pos)
+    if importRule[pos : pos + 4].lower() == "url(":
+        pos += 4
+        while pos < length:
+            ch = importRule[pos]
+            if ch in {"'", '"'}:
+                pos = _skipCssQuoted(importRule, pos)
+                continue
+            pos += 1
+            if ch == ")":
+                return pos
+    return pos
+
+
+def _scopeImportToLayer(importRule: str, layerName: str) -> str:
+    """Insert or nest a `layer(...)` clause on an `@import` rule for the given layer."""
+    trimmed = importRule.strip()
+    if not trimmed.endswith(";"):
+        trimmed += ";"
+    afterTarget = _skipImportTarget(trimmed, len("@import"))
+    prefix = trimmed[:afterTarget]
+    rest = trimmed[afterTarget:].lstrip()
+
+    namedMatch = _IMPORT_LAYER_NAMED_RE.match(rest)
+    if namedMatch is not None:
+        existingLayer = namedMatch.group(1).strip()
+        tail = rest[namedMatch.end() :]
+        return f"{prefix} layer({layerName}.{existingLayer}){tail}"
+
+    anonMatch = _IMPORT_LAYER_ANON_RE.match(rest)
+    if anonMatch is not None:
+        tail = rest[anonMatch.end() :]
+        return f"{prefix} layer({layerName}){tail}"
+
+    if rest == ";":
+        return f"{prefix} layer({layerName});"
+    return f"{prefix} layer({layerName}) {rest}"
+
+
 def _extractLeadingImports(cssText: str) -> tuple[list[str], str]:
-    """Hoist any leading @import rules from custom CSS so they remain valid before @layer ficgen."""
+    """Hoist any leading @import rules from CSS so they remain valid before layer blocks."""
     imports: list[str] = []
     pos = 0
+    lastImportEnd = 0
     length = len(cssText)
 
     while pos < length:
@@ -154,16 +225,65 @@ def _extractLeadingImports(cssText: str) -> tuple[list[str], str]:
         lowered = cssText[pos : pos + 9].lower()
         if lowered.startswith("@charset"):
             pos = _scanCssRuleEnd(cssText, pos)
+            lastImportEnd = pos
             continue
         if lowered.startswith("@import") and (pos + 7 == length or not cssText[pos + 7].isalnum()):
             ruleEnd = _scanCssRuleEnd(cssText, pos)
             imports.append(cssText[pos:ruleEnd].strip())
             pos = ruleEnd
+            lastImportEnd = pos
             continue
         break
 
-    remaining = cssText[pos:].lstrip("\r\n") if imports else cssText
+    remaining = cssText[lastImportEnd:].lstrip("\r\n") if lastImportEnd > 0 else cssText
     return (imports, remaining)
+
+
+def _extractLayerBlocks(
+    blocks: t.Sequence[str],
+    layerName: str,
+) -> tuple[list[str], str]:
+    """Extract layer-scoped @imports and combined CSS body from a sequence of CSS blocks."""
+    scopedImports: list[str] = []
+    bodies: list[str] = []
+    for block in blocks:
+        imports, body = _extractLeadingImports(block)
+        scopedImports.extend(_scopeImportToLayer(rule, layerName) for rule in imports)
+        if body.strip():
+            bodies.append(body.strip())
+    return (scopedImports, "\n\n".join(bodies))
+
+
+def _buildStoryPageCss(
+    archive: Archive,
+    workBlocks: t.Sequence[str],
+    chapterScopes: t.Sequence[tuple[str, t.Sequence[str]]] = (),
+) -> str:
+    """Assemble layered, @scope-wrapped CSS for a story or chapter page, or empty string if none."""
+    allImports: list[str] = []
+    layerSections: list[str] = []
+
+    workImports, workBody = _extractLayerBlocks(workBlocks, "work")
+    allImports.extend(workImports)
+    if workBody:
+        layerSections.append(_wrapLayerBlock("work", _wrapScopedBlock("article.work", workBody)))
+
+    chapterScopeBlocks: list[str] = []
+    for scopeSelector, blocks in chapterScopes:
+        chImports, chBody = _extractLayerBlocks(blocks, "chapter")
+        allImports.extend(chImports)
+        if chBody:
+            chapterScopeBlocks.append(_wrapScopedBlock(scopeSelector, chBody))
+    if chapterScopeBlocks:
+        layerSections.append(_wrapLayerBlock("chapter", "\n\n".join(chapterScopeBlocks)))
+
+    if not allImports and not layerSections:
+        return ""
+
+    layerDecl = _LAYER_ORDER_REPLACE if archive.config.customCssMode == "replace" else _LAYER_ORDER_FULL
+    header = layerDecl if not allImports else layerDecl + "\n" + "\n".join(allImports)
+    assembled = "\n\n".join([header, *layerSections])
+    return _STYLE_CLOSE_RE.sub(r"<\/\1", assembled)
 
 
 def _copyStylesheet(outputDir: Path, config: SiteConfig, written: list[Path]) -> None:
@@ -187,19 +307,24 @@ def _copyStylesheet(outputDir: Path, config: SiteConfig, written: list[Path]) ->
             msg = f"Failed to read custom CSS file {customCssPath}: {exc}"
             raise StoryParseError(msg) from exc
 
+        siteImports, siteBody = _extractLayerBlocks((customCss,), "site")
         if config.customCssMode == "replace":
-            _writeTextFile(outCssPath, customCss, written)
+            header = _LAYER_ORDER_REPLACE if not siteImports else _LAYER_ORDER_REPLACE + "\n" + "\n".join(siteImports)
+            chunks = [header]
+            if siteBody:
+                chunks.append(_wrapLayerBlock("site", siteBody))
+            _writeTextFile(outCssPath, "\n\n".join(chunks) + "\n", written)
             return
 
         packagedCss = resources.files("ficgen").joinpath("static/style.css").read_text(encoding="utf-8")
-        baseCss = _applyFontConfig(packagedCss, config).rstrip() + "\n"
-        imports, bodyCss = _extractLeadingImports(customCss)
-        chunks: list[str] = []
-        if imports:
-            chunks.append("@layer ficgen;\n" + "\n".join(imports))
-        chunks.append(baseCss.rstrip("\n"))
-        if bodyCss.strip():
-            chunks.append(bodyCss.rstrip("\n"))
+        baseCss = _applyFontConfig(packagedCss, config).rstrip()
+        chunks = []
+        if siteImports:
+            chunks.append(_LAYER_ORDER_FULL + "\n" + "\n".join(siteImports))
+            baseCss = _LAYER_ORDER_LINE_RE.sub("", baseCss, count=1)
+        chunks.append(baseCss)
+        if siteBody:
+            chunks.append(_wrapLayerBlock("site", siteBody))
         _writeTextFile(outCssPath, "\n\n".join(chunks) + "\n", written)
         return
 
@@ -228,6 +353,7 @@ def _renderSingleStory(
         metaDescription=story.summaryText,
         activeNav="",
         bodyClass="page-story page-story-single",
+        pageCss=_buildStoryPageCss(archive, story.cssBlocks),
     )
     _writeTextFile(archive.config.outputDir / story.slug / "index.html", html, written)
 
@@ -250,6 +376,7 @@ def _renderMultiChapterStory(
         metaDescription=story.summaryText,
         activeNav="",
         bodyClass="page-story page-story-toc",
+        pageCss=_buildStoryPageCss(archive, story.cssBlocks),
     )
     _writeTextFile(storyOutDir / "index.html", tocHtml, written)
 
@@ -270,6 +397,7 @@ def _renderMultiChapterStory(
             metaDescription=chapter.summaryText,
             activeNav="",
             bodyClass="page-story page-story-chapter",
+            pageCss=_buildStoryPageCss(archive, story.cssBlocks, (("article.work", chapter.cssBlocks),)),
         )
         _writeTextFile(storyOutDir / chapter.filename, chapterHtml, written)
 
@@ -282,6 +410,11 @@ def _renderMultiChapterStory(
         metaDescription=story.summaryText,
         activeNav="",
         bodyClass="page-story page-story-all",
+        pageCss=_buildStoryPageCss(
+            archive,
+            story.cssBlocks,
+            tuple((f"#ch-{chapter.number}", chapter.cssBlocks) for chapter in chapters),
+        ),
     )
     _writeTextFile(storyOutDir / "all.html", allHtml, written)
     return len(chapters)

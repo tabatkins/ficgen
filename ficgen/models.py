@@ -277,6 +277,7 @@ class Chapter:
     extraRelationships: t.MetadataList = ()
     extraCharacters: t.MetadataList = ()
     extraTags: t.MetadataList = ()
+    cssBlocks: tuple[str, ...] = ()
 
     @property
     def displayTitle(self) -> str:
@@ -320,6 +321,7 @@ class Story:
     wordCount: int
     chapters: tuple[Chapter, ...]
     sourceDir: Path
+    cssBlocks: tuple[str, ...] = ()
 
     @property
     def chapterCountDisplay(self) -> str:

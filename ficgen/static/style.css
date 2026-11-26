@@ -1,5 +1,7 @@
 /* Fiction Archive — Modern Literary Reading Stylesheet */
 
+@layer ficgen, site, work, chapter;
+
 @layer ficgen {
   :root {
     color-scheme: light dark;
