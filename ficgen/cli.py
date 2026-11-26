@@ -13,11 +13,74 @@ import kdl
 from . import t
 from .generator import BuildResult, generateSite
 from .importer import ImportOptions, importFromSource
-from .kdlMeta import StoryParseError, getBoolField, getStringField, parseKdlDocument
-from .models import DEFAULT_STORIES_DIR_NAME, SiteConfig
+from .kdlMeta import (
+    StoryParseError,
+    coerceStringValue,
+    getBoolField,
+    getNodeStringArgs,
+    getStringField,
+    normalizeKey,
+    parseKdlDocument,
+)
+from .models import (
+    DEFAULT_MONO_FONT,
+    DEFAULT_SANS_FONT,
+    DEFAULT_SERIF_FONT,
+    DEFAULT_STORIES_DIR_NAME,
+    SiteConfig,
+    formatFontArgs,
+    resolveFontStack,
+)
 from .parser import loadArchive
 from .scaffolder import InitOptions, initSite, initStory
 from .stamper import StampResult, defaultTodayDate, stampStories
+
+_FONT_TOP_LEVEL_SLOTS: t.Final[dict[str, str]] = {
+    "font-serif": "serif",
+    "serif-font": "serif",
+    "font-sans": "sans",
+    "sans-font": "sans",
+    "font-mono": "mono",
+    "mono-font": "mono",
+}
+_FONT_BLOCK_SLOTS: t.Final[dict[str, str]] = {
+    "serif": "serif",
+    "sans": "sans",
+    "mono": "mono",
+    **_FONT_TOP_LEVEL_SLOTS,
+}
+
+
+def _extractFontConfig(configDoc: kdl.Document, sourceDesc: str) -> tuple[str, str, str]:
+    """Extract optional serif, sans, and mono font settings from site.kdl."""
+    slots: dict[str, str] = {"serif": "", "sans": "", "mono": ""}
+    for node in configDoc.nodes:
+        key = normalizeKey(node.name)
+        if key in {"fonts", "font"}:
+            for propName, propVal in node.props.items():
+                slot = _FONT_BLOCK_SLOTS.get(normalizeKey(propName))
+                if slot is not None:
+                    val = coerceStringValue(propVal, propName, sourceDesc)
+                    if val:
+                        slots[slot] = val
+            for child in node.nodes:
+                slot = _FONT_BLOCK_SLOTS.get(normalizeKey(child.name))
+                if slot is not None:
+                    val = formatFontArgs(getNodeStringArgs(child, sourceDesc))
+                    if val:
+                        slots[slot] = val
+        elif key in _FONT_TOP_LEVEL_SLOTS:
+            val = formatFontArgs(getNodeStringArgs(node, sourceDesc))
+            if val:
+                slots[_FONT_TOP_LEVEL_SLOTS[key]] = val
+
+    fontSerif = slots["serif"] or DEFAULT_SERIF_FONT
+    fontSans = slots["sans"] or DEFAULT_SANS_FONT
+    fontMono = slots["mono"] or DEFAULT_MONO_FONT
+    resolveFontStack(fontSerif, role="serif")
+    resolveFontStack(fontSans, role="sans")
+    resolveFontStack(fontMono, role="mono")
+    return (fontSerif, fontSans, fontMono)
 
 
 def _loadKdlConfig(configPath: Path) -> kdl.Document:
@@ -397,6 +460,7 @@ def buildConfigFromArgs(argv: t.Sequence[str] | None = None) -> SiteConfig:
     kdlDrafts = getBoolField(configDoc, "include-drafts", default=False, sourceDesc=configSource)
     includeDrafts = bool(args.drafts) or kdlDrafts
     localBrowsing = getBoolField(configDoc, "local-browsing", default=True, sourceDesc=configSource)
+    fontSerif, fontSans, fontMono = _extractFontConfig(configDoc, configSource)
 
     return SiteConfig(
         storiesDir=storiesDir,
@@ -407,6 +471,9 @@ def buildConfigFromArgs(argv: t.Sequence[str] | None = None) -> SiteConfig:
         baseUrl=_strOpt(args.base_url, "base-url", "https://example.com/"),
         includeDrafts=includeDrafts,
         localBrowsing=localBrowsing,
+        fontSerif=fontSerif,
+        fontSans=fontSans,
+        fontMono=fontMono,
     )
 
 

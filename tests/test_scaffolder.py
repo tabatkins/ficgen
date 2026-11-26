@@ -179,9 +179,13 @@ def test_cli_init_scaffolds_empty_folder_and_builds_cleanly(
     # Example stories use placeholder Lorem Ipsum prose and include commented optional metadata.
     assert "Lorem ipsum" in oneShotMd.read_text(encoding="utf-8")
     assert "Lorem ipsum" in ch1Md.read_text(encoding="utf-8")
-    assert "// include-drafts false" in (archiveDir / "site.kdl").read_text(encoding="utf-8")
-    assert "// local-browsing true" in (archiveDir / "site.kdl").read_text(encoding="utf-8")
-    assert '// stories "_stories"' in (archiveDir / "site.kdl").read_text(encoding="utf-8")
+    siteKdlText = (archiveDir / "site.kdl").read_text(encoding="utf-8")
+    assert "// include-drafts false" in siteKdlText
+    assert "// local-browsing true" in siteKdlText
+    assert '// stories "_stories"' in siteKdlText
+    assert '// font-serif "old-style"' in siteKdlText
+    assert '// font-sans "neogrotesque"' in siteKdlText
+    assert '// font-mono "mono-code"' in siteKdlText
     assert "// planned-chapters" in storyKdl.read_text(encoding="utf-8")
 
     # Running `ficgen build` right away succeeds with zero warnings and generates both stories.

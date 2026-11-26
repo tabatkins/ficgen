@@ -54,6 +54,23 @@ def _coerceString(val: t.Any, fieldName: str, sourceDesc: str) -> str:
     raise StoryParseError(msg)
 
 
+def coerceStringValue(val: t.Any, fieldName: str, sourceDesc: str = "<kdl>") -> str:
+    """Convert a KDL value (str or tagged url) to str, returning empty string for null."""
+    if val is None or isinstance(val, kdl.Null):
+        return ""
+    return _coerceString(val, fieldName, sourceDesc)
+
+
+def getNodeStringArgs(node: kdl.Node, sourceDesc: str = "<kdl>") -> tuple[str, ...]:
+    """Return non-empty string arguments from a single KDL node, rejecting non-string values."""
+    values: list[str] = []
+    for raw in node.args:
+        cleaned = coerceStringValue(raw, node.name, sourceDesc)
+        if cleaned:
+            values.append(cleaned)
+    return tuple(values)
+
+
 def getStringField(doc: kdl.Document, *keys: str, sourceDesc: str = "<kdl>") -> str:
     """Return the string argument of the last matching KDL node, or empty string if absent."""
     nodes = findNodes(doc, *keys)

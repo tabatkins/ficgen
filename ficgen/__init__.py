@@ -17,6 +17,7 @@ from .kdlMeta import (
 )
 from .markdownExt import MarkdownRenderer as MarkdownRenderer
 from .models import (
+    FONT_PRESETS as FONT_PRESETS,
     Archive as Archive,
     Chapter as Chapter,
     FeedEntry as FeedEntry,
@@ -24,6 +25,7 @@ from .models import (
     Story as Story,
     TaxonomyBucket as TaxonomyBucket,
     TaxonomyItem as TaxonomyItem,
+    resolveFontStack as resolveFontStack,
     slugify as slugify,
 )
 from .parser import (
@@ -46,6 +48,7 @@ from .stamper import (
 )
 
 __all__ = [
+    "FONT_PRESETS",
     "Archive",
     "BuildResult",
     "Chapter",
@@ -73,6 +76,7 @@ __all__ = [
     "main",
     "parseKdlDocument",
     "parseMarkdownDocument",
+    "resolveFontStack",
     "slugify",
     "stampDocumentText",
     "stampFile",

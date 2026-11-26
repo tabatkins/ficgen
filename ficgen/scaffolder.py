@@ -10,7 +10,13 @@ import kdl
 
 from . import t
 from .kdlMeta import StoryParseError
-from .models import DEFAULT_STORIES_DIR_NAME, slugify
+from .models import (
+    DEFAULT_MONO_FONT,
+    DEFAULT_SANS_FONT,
+    DEFAULT_SERIF_FONT,
+    DEFAULT_STORIES_DIR_NAME,
+    slugify,
+)
 from .stamper import defaultTodayDate, validateDateString
 
 _SAFE_SLUG_RE: t.Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -188,6 +194,9 @@ def _buildDefaultSiteKdl() -> str:
         + f'// stories "{DEFAULT_STORIES_DIR_NAME}"\n'
         + "// include-drafts false\n"
         + "// local-browsing true\n"
+        + f'// font-serif "{DEFAULT_SERIF_FONT}"    // presets: old-style, transitional, slab-serif, antique, didone (or custom CSS font stack)\n'
+        + f'// font-sans "{DEFAULT_SANS_FONT}"  // presets: neogrotesque, system-ui, humanist, geometric-humanist, classical-humanist, industrial, rounded-sans, handwritten\n'
+        + f'// font-mono "{DEFAULT_MONO_FONT}"     // presets: mono-code, mono-slab-serif (or custom CSS font stack)\n'
     )
 
 

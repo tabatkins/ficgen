@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 from html.parser import HTMLParser
+from importlib import resources
 from pathlib import Path
 from xml.parsers import expat
 
@@ -13,7 +14,7 @@ import pytest
 from ficgen import t
 from ficgen.cli import buildConfigFromArgs, main
 from ficgen.generator import generateSite
-from ficgen.models import SiteConfig
+from ficgen.models import FONT_PRESETS, SiteConfig, resolveFontStack
 from ficgen.parser import loadArchive
 
 _ATOM_NS: t.Final[str] = "http://www.w3.org/2005/Atom"
@@ -525,3 +526,108 @@ def test_site_kdl_local_browsing_option_toggles_file_url_script(tmp_path: Path) 
     assert main(["--stories", str(storiesDir), "--output", str(outEnabled), "--config", str(cfgPath)]) == 0
     for htmlFile in outEnabled.rglob("*.html"):
         assert 'location.protocol === "file:"' in htmlFile.read_text(encoding="utf-8")
+
+
+def test_font_presets_match_packaged_stylesheet() -> None:
+    """FONT_PRESETS stays in exact 1-to-1 sync with preset custom properties in style.css."""
+    cssText = resources.files("ficgen").joinpath("static/style.css").read_text(encoding="utf-8")
+    declared = set(re.findall(r"(?m)^[ \t]*--font-([a-z0-9-]+):[ \t]*", cssText)) - {"serif", "sans", "mono"}
+    assert declared == set(FONT_PRESETS)
+
+
+def test_site_kdl_font_presets_and_custom_stacks(tmp_path: Path) -> None:
+    """`site.kdl` supports choosing built-in font presets or custom font stacks for serif, sans, and mono."""
+    storiesDir = _createSampleStories(tmp_path / "_stories")
+    packagedCss = resources.files("ficgen").joinpath("static/style.css").read_text(encoding="utf-8")
+
+    # Default build emits style.css identical to the packaged stylesheet.
+    outDefault = tmp_path / "out-default"
+    assert main(["--stories", str(storiesDir), "--output", str(outDefault)]) == 0
+    assert (outDefault / "style.css").read_text(encoding="utf-8") == packagedCss
+
+    # Top-level flat nodes with preset names (including case/space/prefix normalization).
+    cfgPath = tmp_path / "site.kdl"
+    cfgPath.write_text(
+        'font-serif "Transitional"\n' + 'font-sans "humanist"\n' + 'font-mono "--font-mono-slab-serif"\n',
+        encoding="utf-8",
+    )
+    outPresets = tmp_path / "out-presets"
+    assert main(["--stories", str(storiesDir), "--output", str(outPresets), "--config", str(cfgPath)]) == 0
+    presetCss = (outPresets / "style.css").read_text(encoding="utf-8")
+    assert "--font-serif: var(--font-transitional);" in presetCss
+    assert "--font-sans: var(--font-humanist);" in presetCss
+    assert "--font-mono: var(--font-mono-slab-serif);" in presetCss
+
+    # Nested `fonts { ... }` block with custom CSS stacks and multi-arg stacks (including preset fallback).
+    cfgPath.write_text(
+        "fonts {\n"
+        + "    serif \"'Literata', Georgia, serif\"\n"
+        + '    sans "Atkinson Hyperlegible" "system-ui"\n'
+        + '    mono "JetBrains Mono" "Fira Code" "monospace"\n'
+        + "}\n",
+        encoding="utf-8",
+    )
+    outCustom = tmp_path / "out-custom"
+    assert main(["--stories", str(storiesDir), "--output", str(outCustom), "--config", str(cfgPath)]) == 0
+    customCss = (outCustom / "style.css").read_text(encoding="utf-8")
+    assert "--font-serif: 'Literata', Georgia, serif;" in customCss
+    assert "--font-sans: 'Atkinson Hyperlegible', var(--font-system-ui);" in customCss
+    assert "--font-mono: 'JetBrains Mono', 'Fira Code', monospace;" in customCss
+
+    # `fonts` node properties also work.
+    cfgPath.write_text('fonts serif="didone" sans="rounded-sans" mono="Courier, monospace;"\n', encoding="utf-8")
+    propsCfg = buildConfigFromArgs(["--stories", str(storiesDir), "--config", str(cfgPath)])
+    assert resolveFontStack(propsCfg.fontSerif, role="serif") == "var(--font-didone)"
+    assert resolveFontStack(propsCfg.fontSans, role="sans") == "var(--font-rounded-sans)"
+    assert resolveFontStack(propsCfg.fontMono, role="mono") == "Courier, monospace"
+
+    # Invalid CSS characters or non-string font values fail cleanly.
+    cfgPath.write_text('font-serif "Georgia; color: red"\n', encoding="utf-8")
+    assert main(["--stories", str(storiesDir), "--output", str(outCustom), "--config", str(cfgPath)]) == 1
+
+    cfgPath.write_text("fonts {\n    serif 123\n}\n", encoding="utf-8")
+    assert main(["--stories", str(storiesDir), "--output", str(outCustom), "--config", str(cfgPath)]) == 1
+
+
+def test_custom_font_stack_appends_generic_fallback_and_validates_position(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Custom stacks append serif/sans-serif/monospace when missing and reject misplaced generic keywords."""
+    storiesDir = _createSampleStories(tmp_path / "_stories")
+    cfgPath = tmp_path / "site.kdl"
+
+    # Custom stacks without a generic fallback get the slot's generic fallback appended.
+    cfgPath.write_text(
+        "font-serif \"'Literata', Georgia\"\n"
+        + 'font-sans "Atkinson Hyperlegible" "Inter"\n'
+        + 'font-mono "JetBrains Mono"\n',
+        encoding="utf-8",
+    )
+    outDir = tmp_path / "out-fallback"
+    assert main(["build", "--stories", str(storiesDir), "--output", str(outDir), "--config", str(cfgPath)]) == 0
+    css = (outDir / "style.css").read_text(encoding="utf-8")
+    assert "--font-serif: 'Literata', Georgia, serif;" in css
+    assert "--font-sans: 'Atkinson Hyperlegible', Inter, sans-serif;" in css
+    assert "--font-mono: JetBrains Mono, monospace;" in css
+
+    # Quoted font name matching a generic keyword is not treated as the generic keyword.
+    assert resolveFontStack("'Serif', Georgia", role="serif") == "'Serif', Georgia, serif"
+    # Existing generic fallback at the end (even for another family, e.g. sans-serif in serif slot) is kept as-is.
+    assert resolveFontStack("Inter, sans-serif", role="serif") == "Inter, sans-serif"
+    assert resolveFontStack("serif", role="serif") == "serif"
+    # Platform keywords like system-ui or ui-monospace may appear before other fonts and still get ultimate fallback.
+    assert resolveFontStack("ui-monospace, Consolas", role="mono") == "ui-monospace, Consolas, monospace"
+
+    # Generic fallback keywords (or presets) before another font fail `ficgen build` with an error.
+    for badKdl in (
+        'font-serif "serif, Georgia"\n',
+        'font-serif "Georgia, serif, Times"\n',
+        'font-sans "sans-serif" "Inter"\n',
+        'font-mono "monospace, Consolas"\n',
+        'font-serif "old-style" "Georgia"\n',
+    ):
+        cfgPath.write_text(badKdl, encoding="utf-8")
+        assert main(["build", "--stories", str(storiesDir), "--output", str(outDir), "--config", str(cfgPath)]) == 1
+        captured = capsys.readouterr()
+        assert "must be at the end" in captured.err

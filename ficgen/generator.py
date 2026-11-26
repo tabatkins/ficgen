@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import re
 import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -12,7 +13,18 @@ from pathlib import Path
 from jinja2 import Environment, PackageLoader, select_autoescape
 
 from . import t
-from .models import TAXONOMY_SPECS, Archive, Story, TaxonomyBucket
+from .models import (
+    TAXONOMY_SPECS,
+    Archive,
+    SiteConfig,
+    Story,
+    TaxonomyBucket,
+    resolveFontStack,
+)
+
+_FONT_SERIF_RE: t.Final[re.Pattern[str]] = re.compile(r"(?m)^([ \t]*--font-serif:[ \t]*)([^;\n]+)(;)")
+_FONT_SANS_RE: t.Final[re.Pattern[str]] = re.compile(r"(?m)^([ \t]*--font-sans:[ \t]*)([^;\n]+)(;)")
+_FONT_MONO_RE: t.Final[re.Pattern[str]] = re.compile(r"(?m)^([ \t]*--font-mono:[ \t]*)([^;\n]+)(;)")
 
 
 @dataclass(slots=True)
@@ -70,10 +82,27 @@ def _cleanStoryDir(storyOutDir: Path) -> None:
         storyOutDir.rmdir()
 
 
-def _copyStylesheet(outputDir: Path, written: list[Path]) -> None:
-    """Copy the packaged CSS stylesheet into the archive output directory."""
+def _replaceCssVar(cssText: str, pattern: re.Pattern[str], cssValue: str) -> str:
+    """Replace the first matching CSS custom property value in cssText."""
+
+    def _sub(match: re.Match[str]) -> str:
+        return f"{match.group(1)}{cssValue}{match.group(3)}"
+
+    return pattern.sub(_sub, cssText, count=1)
+
+
+def _applyFontConfig(cssText: str, config: SiteConfig) -> str:
+    """Substitute configured serif, sans, and mono font stacks into style.css."""
+    updated = _replaceCssVar(cssText, _FONT_SERIF_RE, resolveFontStack(config.fontSerif, role="serif"))
+    updated = _replaceCssVar(updated, _FONT_SANS_RE, resolveFontStack(config.fontSans, role="sans"))
+    return _replaceCssVar(updated, _FONT_MONO_RE, resolveFontStack(config.fontMono, role="mono"))
+
+
+def _copyStylesheet(outputDir: Path, config: SiteConfig, written: list[Path]) -> None:
+    """Write the packaged CSS stylesheet with configured fonts into the archive output directory."""
     cssText = resources.files("ficgen").joinpath("static/style.css").read_text(encoding="utf-8")
-    _writeTextFile(outputDir / "style.css", cssText, written)
+    renderedCss = _applyFontConfig(cssText, config)
+    _writeTextFile(outputDir / "style.css", renderedCss, written)
 
 
 def _renderSingleStory(
@@ -226,7 +255,7 @@ def generateSite(archive: Archive) -> BuildResult:
     for slug in archive.allStorySlugs:
         _cleanStoryDir(outputDir / slug)
 
-    _copyStylesheet(outputDir, written)
+    _copyStylesheet(outputDir, archive.config, written)
 
     indexTemplate = env.get_template("index.html")
     storyCount = len(archive.stories)
