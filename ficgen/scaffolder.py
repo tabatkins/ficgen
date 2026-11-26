@@ -1,15 +1,13 @@
-"""Scaffold new single-document and multi-chapter story directories."""
+"""Scaffold new archives, single-document stories, and multi-chapter story directories."""
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
-import kdl
-
 from . import t
-from .kdlMeta import StoryParseError
+from .kdlMeta import StoryParseError, formatKdlListLine, formatKdlString
 from .models import (
     DEFAULT_CUSTOM_CSS_NAME,
     DEFAULT_MONO_FONT,
@@ -21,6 +19,17 @@ from .models import (
 from .stamper import defaultTodayDate, validateDateString
 
 _SAFE_SLUG_RE: t.Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+_EXAMPLE_CHAPTER_COMMENTED_META: t.Final[str] = (
+    "// published false\n"
+    + '// summary "Optional chapter summary (or use a <summary> block)."\n'
+    + '// notes "Optional chapter top notes (or use a <notes> block)."\n'
+    + '// endnotes "Optional chapter end notes (or use an <endnotes> block)."\n'
+    + '// fandoms "Chapter-Specific Fandom"\n'
+    + '// categories "Gen"\n'
+    + '// characters "Extra Character"\n'
+    + '// relationships "Extra Character/Another Character"\n'
+    + '// tags "Chapter-Specific Tag"\n'
+)
 
 
 @dataclass(slots=True)
@@ -60,19 +69,6 @@ class SiteInitResult:
     createdFiles: tuple[Path, ...]
 
 
-def _formatKdlString(value: str) -> str:
-    """Serialize a Python string as a properly escaped KDL string literal."""
-    return kdl.String(value).print()
-
-
-def _formatKdlListLine(nodeName: str, values: t.MetadataList) -> str:
-    """Format a KDL list metadata line, using an empty string placeholder when unset."""
-    if not values:
-        return f'{nodeName} ""'
-    args = " ".join(_formatKdlString(item) for item in values)
-    return f"{nodeName} {args}"
-
-
 def resolveStorySlug(title: str, explicitSlug: str) -> str:
     """Validate an explicit slug or derive one cleanly from the story title."""
     cleanedTitle = title.strip()
@@ -80,7 +76,7 @@ def resolveStorySlug(title: str, explicitSlug: str) -> str:
         msg = "Story title cannot be empty."
         raise StoryParseError(msg)
 
-    slug = explicitSlug.strip() if explicitSlug.strip() else slugify(cleanedTitle)
+    slug = explicitSlug.strip() or slugify(cleanedTitle)
     if not _SAFE_SLUG_RE.match(slug):
         msg = (
             f"Invalid story slug {slug!r}: must start with a lowercase letter or digit "
@@ -90,22 +86,29 @@ def resolveStorySlug(title: str, explicitSlug: str) -> str:
     return slug
 
 
+def _kdlListOrEmpty(nodeName: str, values: t.MetadataList) -> str:
+    """Format a KDL list line, always emitting an empty placeholder when unset."""
+    line = formatKdlListLine(nodeName, values, emitEmpty=True)
+    assert line is not None
+    return line
+
+
 def _buildStoryMetadataLines(options: InitOptions, *, includeTitle: bool, includePublishState: bool) -> list[str]:
     """Build KDL metadata lines shared by single-doc index.md and multi-chapter story.kdl."""
     lines: list[str] = []
     if includeTitle:
-        lines.append(f"title {_formatKdlString(options.title.strip())}")
-    lines.append(_formatKdlListLine("fandoms", options.fandoms))
-    lines.append(_formatKdlListLine("categories", options.categories))
-    lines.append(_formatKdlListLine("characters", options.characters))
-    lines.append(_formatKdlListLine("relationships", options.relationships))
-    lines.append(_formatKdlListLine("tags", options.tags))
+        lines.append(f"title {formatKdlString(options.title.strip())}")
+    lines.append(_kdlListOrEmpty("fandoms", options.fandoms))
+    lines.append(_kdlListOrEmpty("categories", options.categories))
+    lines.append(_kdlListOrEmpty("characters", options.characters))
+    lines.append(_kdlListOrEmpty("relationships", options.relationships))
+    lines.append(_kdlListOrEmpty("tags", options.tags))
 
     if includePublishState:
         if options.dateValue:
-            lines.append(f"date {_formatKdlString(options.dateValue)}")
+            lines.append(f"date {formatKdlString(options.dateValue)}")
         elif options.published:
-            lines.append(f"date {_formatKdlString(defaultTodayDate())}")
+            lines.append(f"date {formatKdlString(defaultTodayDate())}")
         if not options.published:
             lines.append("published false")
 
@@ -116,9 +119,9 @@ def _buildChapterContent(chapterNum: int, *, published: bool, dateValue: str) ->
     """Build starter Markdown content for a chapter file."""
     metaLines: list[str] = [f"chapter {chapterNum}"]
     if dateValue:
-        metaLines.append(f"date {_formatKdlString(dateValue)}")
+        metaLines.append(f"date {formatKdlString(dateValue)}")
     elif published:
-        metaLines.append(f"date {_formatKdlString(defaultTodayDate())}")
+        metaLines.append(f"date {formatKdlString(defaultTodayDate())}")
     if not published:
         metaLines.append("published false")
 
@@ -136,22 +139,15 @@ def initStory(options: InitOptions) -> InitResult:
         raise StoryParseError(msg)
 
     validatedDate = validateDateString(options.dateValue) if options.dateValue.strip() else ""
-    effectiveOptions = InitOptions(
-        storiesDir=options.storiesDir,
+    effective = replace(
+        options,
         title=title,
         slug=slug,
         multiChapter=options.multiChapter or options.chapterCount > 1,
-        chapterCount=options.chapterCount,
-        published=options.published,
         dateValue=validatedDate,
-        fandoms=options.fandoms,
-        categories=options.categories,
-        relationships=options.relationships,
-        characters=options.characters,
-        tags=options.tags,
     )
 
-    storyDir = effectiveOptions.storiesDir / slug
+    storyDir = effective.storiesDir / slug
     if storyDir.exists():
         msg = f"Story directory already exists: {storyDir}"
         raise StoryParseError(msg)
@@ -159,25 +155,25 @@ def initStory(options: InitOptions) -> InitResult:
     storyDir.mkdir(parents=True, exist_ok=False)
     created: list[Path] = []
 
-    if not effectiveOptions.multiChapter:
-        metaLines = _buildStoryMetadataLines(effectiveOptions, includeTitle=False, includePublishState=True)
+    if not effective.multiChapter:
+        metaLines = _buildStoryMetadataLines(effective, includeTitle=False, includePublishState=True)
         indexPath = storyDir / "index.md"
         indexContent = f"# {title}\n\n```metadata\n" + "\n".join(metaLines) + "\n```\n\n"
         indexPath.write_text(indexContent, encoding="utf-8")
         created.append(indexPath)
     else:
-        storyMetaLines = _buildStoryMetadataLines(effectiveOptions, includeTitle=True, includePublishState=False)
+        storyMetaLines = _buildStoryMetadataLines(effective, includeTitle=True, includePublishState=False)
         storyMetaLines.append('// summary ""')
         storyKdlPath = storyDir / "story.kdl"
         storyKdlPath.write_text("\n".join(storyMetaLines) + "\n", encoding="utf-8")
         created.append(storyKdlPath)
 
-        for chapterNum in range(1, effectiveOptions.chapterCount + 1):
+        for chapterNum in range(1, effective.chapterCount + 1):
             chapterPath = storyDir / f"ch{chapterNum}.md"
             chapterContent = _buildChapterContent(
                 chapterNum,
-                published=effectiveOptions.published,
-                dateValue=effectiveOptions.dateValue,
+                published=effective.published,
+                dateValue=effective.dateValue,
             )
             chapterPath.write_text(chapterContent, encoding="utf-8")
             created.append(chapterPath)
@@ -204,7 +200,7 @@ def _buildDefaultSiteKdl() -> str:
 
 def _buildExampleOneShotMd(todayDate: str) -> str:
     """Build an example single-document story with Lorem Ipsum prose and commented optional metadata."""
-    dateLit = _formatKdlString(todayDate)
+    dateLit = formatKdlString(todayDate)
     return (
         "# Example One-Shot\n\n"
         + "```metadata\n"
@@ -251,7 +247,7 @@ def _buildExampleOneShotMd(todayDate: str) -> str:
 
 def _buildExampleMultiStoryKdl(todayDate: str) -> str:
     """Build an example multi-chapter story.kdl with defaults and commented optional metadata."""
-    dateLit = _formatKdlString(todayDate)
+    dateLit = formatKdlString(todayDate)
     return (
         'title "Example Multi-Chapter Story"\n'
         + 'fandoms "Original Work"\n'
@@ -273,62 +269,27 @@ def _buildExampleMultiStoryKdl(todayDate: str) -> str:
     )
 
 
-def _buildExampleChapterOneMd(todayDate: str) -> str:
-    """Build chapter 1 of the example multi-chapter story."""
-    dateLit = _formatKdlString(todayDate)
+def _buildExampleChapterMd(
+    chapterNum: int,
+    title: str,
+    todayDate: str,
+    *,
+    noteBlock: str,
+    prose: str,
+) -> str:
+    """Build an example multi-chapter Markdown file with commented optional metadata."""
+    dateLit = formatKdlString(todayDate)
+    titleLit = formatKdlString(title)
     return (
-        "# Lorem Ipsum\n\n"
+        f"# {title}\n\n"
         + "```metadata\n"
-        + "chapter 1\n"
+        + f"chapter {chapterNum}\n"
         + f"date {dateLit}\n"
-        + '// title "Lorem Ipsum"\n'
-        + "// published false\n"
-        + '// summary "Optional chapter summary (or use a <summary> block)."\n'
-        + '// notes "Optional chapter top notes (or use a <notes> block)."\n'
-        + '// endnotes "Optional chapter end notes (or use an <endnotes> block)."\n'
-        + '// fandoms "Chapter-Specific Fandom"\n'
-        + '// categories "Gen"\n'
-        + '// characters "Extra Character"\n'
-        + '// relationships "Extra Character/Another Character"\n'
-        + '// tags "Chapter-Specific Tag"\n'
+        + f"// title {titleLit}\n"
+        + _EXAMPLE_CHAPTER_COMMENTED_META
         + "```\n\n"
-        + "<notes>\n"
-        + "Sed cursus ante dapibus diam. Sed nisi. Nulla quis sem at nibh elementum imperdiet.\n"
-        + "</notes>\n\n"
-        + "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio. "
-        + "Praesent libero. Sed cursus ante dapibus diam. Sed nisi. Nulla quis sem at nibh "
-        + "elementum imperdiet.\n\n"
-        + "Duis sagittis ipsum. Praesent mauris. Fusce nec tellus sed augue semper porta. "
-        + "Mauris massa. Vestibulum lacinia arcu eget nulla.\n"
-    )
-
-
-def _buildExampleChapterTwoMd(todayDate: str) -> str:
-    """Build chapter 2 of the example multi-chapter story."""
-    dateLit = _formatKdlString(todayDate)
-    return (
-        "# Dolor Sit Amet\n\n"
-        + "```metadata\n"
-        + "chapter 2\n"
-        + f"date {dateLit}\n"
-        + '// title "Dolor Sit Amet"\n'
-        + "// published false\n"
-        + '// summary "Optional chapter summary (or use a <summary> block)."\n'
-        + '// notes "Optional chapter top notes (or use a <notes> block)."\n'
-        + '// endnotes "Optional chapter end notes (or use an <endnotes> block)."\n'
-        + '// fandoms "Chapter-Specific Fandom"\n'
-        + '// categories "Gen"\n'
-        + '// characters "Extra Character"\n'
-        + '// relationships "Extra Character/Another Character"\n'
-        + '// tags "Chapter-Specific Tag"\n'
-        + "```\n\n"
-        + "<endnotes>\n"
-        + "Class aptent taciti sociosqu ad litora torquent per conubia nostra, per inceptos himenaeos.\n"
-        + "</endnotes>\n\n"
-        + "Class aptent taciti sociosqu ad litora torquent per conubia nostra, per inceptos "
-        + "himenaeos. Curabitur sodales ligula in libero. Sed dignissim lacinia nunc.\n\n"
-        + "Curabitur tortor. Pellentesque nibh. Aenean quam. In scelerisque sem at dolor. "
-        + "Maecenas mattis. Sed convallis tristique sem.\n"
+        + f"{noteBlock}\n\n"
+        + f"{prose}\n"
     )
 
 
@@ -365,11 +326,48 @@ def initSite(targetDir: Path) -> SiteInitResult:
     created.append(storyKdlPath)
 
     ch1Path = multiDir / "ch1.md"
-    ch1Path.write_text(_buildExampleChapterOneMd(todayDate), encoding="utf-8")
+    ch1Path.write_text(
+        _buildExampleChapterMd(
+            1,
+            "Lorem Ipsum",
+            todayDate,
+            noteBlock=(
+                "<notes>\n"
+                + "Sed cursus ante dapibus diam. Sed nisi. Nulla quis sem at nibh elementum imperdiet.\n"
+                + "</notes>"
+            ),
+            prose=(
+                "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio. "
+                + "Praesent libero. Sed cursus ante dapibus diam. Sed nisi. Nulla quis sem at nibh "
+                + "elementum imperdiet.\n\n"
+                + "Duis sagittis ipsum. Praesent mauris. Fusce nec tellus sed augue semper porta. "
+                + "Mauris massa. Vestibulum lacinia arcu eget nulla."
+            ),
+        ),
+        encoding="utf-8",
+    )
     created.append(ch1Path)
 
     ch2Path = multiDir / "ch2.md"
-    ch2Path.write_text(_buildExampleChapterTwoMd(todayDate), encoding="utf-8")
+    ch2Path.write_text(
+        _buildExampleChapterMd(
+            2,
+            "Dolor Sit Amet",
+            todayDate,
+            noteBlock=(
+                "<endnotes>\n"
+                + "Class aptent taciti sociosqu ad litora torquent per conubia nostra, per inceptos himenaeos.\n"
+                + "</endnotes>"
+            ),
+            prose=(
+                "Class aptent taciti sociosqu ad litora torquent per conubia nostra, per inceptos "
+                + "himenaeos. Curabitur sodales ligula in libero. Sed dignissim lacinia nunc.\n\n"
+                + "Curabitur tortor. Pellentesque nibh. Aenean quam. In scelerisque sem at dolor. "
+                + "Maecenas mattis. Sed convallis tristique sem."
+            ),
+        ),
+        encoding="utf-8",
+    )
     created.append(ch2Path)
 
     return SiteInitResult(

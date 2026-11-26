@@ -96,24 +96,28 @@ def _chatBlockRule(state: StateBlock, startLine: int, endLine: int, silent: bool
     return True
 
 
-def _emDashCoreRule(state: StateCore) -> None:
-    """Convert prose double-hyphens (--) into em-dashes before markdown-it's en-dash rule."""
+def _iterTextTokens(state: StateCore) -> t.Iterator[t.Any]:
+    """Yield inline text child tokens across all block-level inline tokens."""
     for token in state.tokens:
         if token.type != "inline" or not token.children:
             continue
         for child in token.children:
-            if child.type == "text" and "--" in child.content:
-                child.content = _EM_DASH_RE.sub("—", child.content)
+            if child.type == "text":
+                yield child
+
+
+def _emDashCoreRule(state: StateCore) -> None:
+    """Convert prose double-hyphens (--) into em-dashes before markdown-it's en-dash rule."""
+    for child in _iterTextTokens(state):
+        if "--" in child.content:
+            child.content = _EM_DASH_RE.sub("—", child.content)
 
 
 def _ellipsisQuoteCoreRule(state: StateCore) -> None:
     """Fix opening double quotes immediately before an ellipsis (e.g. '...We')."""
-    for token in state.tokens:
-        if token.type != "inline" or not token.children:
-            continue
-        for child in token.children:
-            if child.type == "text" and "”…" in child.content:
-                child.content = _ELLIPSIS_OPEN_QUOTE_RE.sub(r"\1“", child.content)
+    for child in _iterTextTokens(state):
+        if "”…" in child.content:
+            child.content = _ELLIPSIS_OPEN_QUOTE_RE.sub(r"\1“", child.content)
 
 
 class _TextExtractor(HTMLParser):

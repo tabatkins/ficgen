@@ -128,3 +128,24 @@ def test_stamp_invalid_date_raises_directly(tmp_path: Path) -> None:
     """Invalid date values raise StoryParseError."""
     with pytest.raises(StoryParseError, match="Invalid ISO-8601 date"):
         stampStories(tmp_path, "2026-99-99")
+
+
+def test_stamp_document_handles_leading_blanks_empty_fence_and_duplicate_dates() -> None:
+    """Stamping handles leading blanks before `# Title` + ```kdl, empty fences, and duplicate date nodes."""
+    leadingKdl = '\n# Leading Blanks\n\n```kdl\nauthor "Writer"\n```\n\nBody.\n'
+    stampedKdl, changedKdl = stampDocumentText(leadingKdl, "2026-11-24")
+    assert changedKdl is True
+    assert stampedKdl.count("```") == 2
+    assert 'date "2026-11-24"' in stampedKdl
+
+    emptyFence = "# Empty\n\n```metadata\n```\n\nBody.\n"
+    stampedEmpty, changedEmpty = stampDocumentText(emptyFence, "2026-11-24")
+    assert changedEmpty is True
+    assert stampedEmpty == '# Empty\n\n```metadata\ndate "2026-11-24"\n```\n\nBody.\n'
+
+    dupDates = '# Dups\n\n```metadata\ndate "2025-01-01"\ndate "2025-06-01"\n```\n\nBody.\n'
+    forcedDup, changedDup = stampDocumentText(dupDates, "2026-11-24", force=True)
+    assert changedDup is True
+    assert "2025-01-01" not in forcedDup
+    assert "2025-06-01" not in forcedDup
+    assert 'date "2026-11-24"' in forcedDup

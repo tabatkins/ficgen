@@ -1,4 +1,4 @@
-"""KDL metadata parsing and typed field extraction helpers."""
+"""KDL metadata parsing, formatting, and typed field extraction helpers."""
 
 from __future__ import annotations
 
@@ -25,6 +25,20 @@ def normalizeKey(name: str) -> str:
     return _KEY_SEP_RE.sub("-", name.strip().lower())
 
 
+def isKdlNull(val: t.Any) -> bool:
+    """Return True if a parsed KDL value represents null."""
+    return val is None or isinstance(val, kdl.Null)
+
+
+def readUtf8File(path: Path, label: str = "file") -> str:
+    """Read a UTF-8 text file, wrapping I/O and encoding errors in StoryParseError."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        msg = f"Failed to read {label} {path}: {exc}"
+        raise StoryParseError(msg) from exc
+
+
 def parseKdlDocument(text: str, sourceDesc: str = "<kdl>") -> kdl.Document:
     """Parse a KDL string into a kdl.Document, wrapping syntax errors in StoryParseError."""
     if not text.strip():
@@ -36,14 +50,57 @@ def parseKdlDocument(text: str, sourceDesc: str = "<kdl>") -> kdl.Document:
         raise StoryParseError(msg) from exc
 
 
+def parseIsoDateTime(raw: str, errorMessage: str) -> dt.datetime:
+    """Parse an ISO-8601 date or datetime string into a UTC-aware datetime."""
+    try:
+        parsed = dt.datetime.fromisoformat(raw)
+    except ValueError as exc:
+        raise StoryParseError(errorMessage) from exc
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=dt.UTC)
+    return parsed.astimezone(dt.UTC)
+
+
+def formatKdlString(value: str) -> str:
+    """Serialize a Python string as a properly escaped KDL string literal."""
+    return kdl.String(value).print()
+
+
+def formatKdlListLine(
+    nodeName: str,
+    values: t.Sequence[str],
+    *,
+    emitEmpty: bool = False,
+) -> str | None:
+    """Format a KDL list metadata line, optionally emitting an empty-string placeholder."""
+    cleaned = [val.strip() for val in values if val.strip()]
+    if not cleaned:
+        return f'{nodeName} ""' if emitEmpty else None
+    args = " ".join(formatKdlString(val) for val in cleaned)
+    return f"{nodeName} {args}"
+
+
 def findNodes(doc: kdl.Document, *keys: str) -> list[kdl.Node]:
     """Return all top-level nodes whose normalized name matches any candidate key."""
     targets = {normalizeKey(key) for key in keys}
     return [node for node in doc.nodes if normalizeKey(node.name) in targets]
 
 
-def _coerceString(val: t.Any, fieldName: str, sourceDesc: str) -> str:
-    """Convert a KDL value (str or tagged url) to str, rejecting incompatible types."""
+def _iterNonNullFirstArgs(doc: kdl.Document, *keys: str) -> t.Iterator[tuple[kdl.Node, t.Any]]:
+    """Yield (node, firstArg) in reverse order for matching nodes whose first argument is non-null."""
+    for node in reversed(findNodes(doc, *keys)):
+        if not node.args:
+            continue
+        first = node.args[0]
+        if isKdlNull(first):
+            continue
+        yield (node, first)
+
+
+def coerceStringValue(val: t.Any, fieldName: str, sourceDesc: str = "<kdl>") -> str:
+    """Convert a KDL value (str or tagged url) to str, returning empty string for null."""
+    if isKdlNull(val):
+        return ""
     if isinstance(val, str):
         return val.strip()
     if isinstance(val, urllib.parse.ParseResult):
@@ -52,13 +109,6 @@ def _coerceString(val: t.Any, fieldName: str, sourceDesc: str) -> str:
         return str(val.value).strip()
     msg = f"Expected string value for KDL field {fieldName!r} in {sourceDesc}, got {val!r}"
     raise StoryParseError(msg)
-
-
-def coerceStringValue(val: t.Any, fieldName: str, sourceDesc: str = "<kdl>") -> str:
-    """Convert a KDL value (str or tagged url) to str, returning empty string for null."""
-    if val is None or isinstance(val, kdl.Null):
-        return ""
-    return _coerceString(val, fieldName, sourceDesc)
 
 
 def getNodeStringArgs(node: kdl.Node, sourceDesc: str = "<kdl>") -> tuple[str, ...]:
@@ -73,14 +123,8 @@ def getNodeStringArgs(node: kdl.Node, sourceDesc: str = "<kdl>") -> tuple[str, .
 
 def getStringField(doc: kdl.Document, *keys: str, sourceDesc: str = "<kdl>") -> str:
     """Return the string argument of the last matching KDL node, or empty string if absent."""
-    nodes = findNodes(doc, *keys)
-    for node in reversed(nodes):
-        if not node.args:
-            continue
-        first = node.args[0]
-        if first is None or isinstance(first, kdl.Null):
-            continue
-        value = _coerceString(first, node.name, sourceDesc)
+    for node, first in _iterNonNullFirstArgs(doc, *keys):
+        value = coerceStringValue(first, node.name, sourceDesc)
         if value:
             return value
     return ""
@@ -96,9 +140,7 @@ def getListField(doc: kdl.Document, *keys: str, sourceDesc: str = "<kdl>") -> t.
     items: list[str] = []
 
     def _addItem(rawVal: t.Any, fieldName: str) -> None:
-        if rawVal is None or isinstance(rawVal, kdl.Null):
-            return
-        cleaned = _coerceString(rawVal, fieldName, sourceDesc)
+        cleaned = coerceStringValue(rawVal, fieldName, sourceDesc)
         lowered = cleaned.lower()
         if cleaned and lowered not in seen:
             seen.add(lowered)
@@ -112,6 +154,7 @@ def getListField(doc: kdl.Document, *keys: str, sourceDesc: str = "<kdl>") -> t.
                 for childArg in child.args:
                     _addItem(childArg, node.name)
             elif child.name != "-":
+                # Allow bare string child nodes without a leading `-` bullet.
                 _addItem(child.name, node.name)
 
     return tuple(items)
@@ -124,13 +167,7 @@ def getBoolField(
     sourceDesc: str = "<kdl>",
 ) -> bool:
     """Parse an optional boolean KDL field (native bool or status string)."""
-    nodes = findNodes(doc, *keys)
-    for node in reversed(nodes):
-        if not node.args:
-            continue
-        raw = node.args[0]
-        if raw is None or isinstance(raw, kdl.Null):
-            continue
+    for node, raw in _iterNonNullFirstArgs(doc, *keys):
         if isinstance(raw, bool):
             return raw
         if isinstance(raw, kdl.Bool):
@@ -146,15 +183,14 @@ def getBoolField(
     return default
 
 
-def getIntField(doc: kdl.Document, *keys: str, sourceDesc: str = "<kdl>") -> int | None:
-    """Parse an optional positive integer KDL field."""
-    nodes = findNodes(doc, *keys)
-    for node in reversed(nodes):
-        if not node.args:
-            continue
-        raw = node.args[0]
-        if raw is None or isinstance(raw, kdl.Null):
-            continue
+def getIntField(
+    doc: kdl.Document,
+    *keys: str,
+    minValue: int = 1,
+    sourceDesc: str = "<kdl>",
+) -> int | None:
+    """Parse an optional integer KDL field bounded below by minValue."""
+    for node, raw in _iterNonNullFirstArgs(doc, *keys):
         if isinstance(raw, bool):
             msg = f"Expected integer for KDL field {node.name!r} in {sourceDesc}, got bool {raw!r}"
             raise StoryParseError(msg)
@@ -167,8 +203,8 @@ def getIntField(doc: kdl.Document, *keys: str, sourceDesc: str = "<kdl>") -> int
         else:
             msg = f"Invalid integer value for KDL field {node.name!r} in {sourceDesc}: {raw!r}"
             raise StoryParseError(msg)
-        if value < 1:
-            msg = f"KDL field {node.name!r} in {sourceDesc} must be >= 1, got {value}"
+        if value < minValue:
+            msg = f"KDL field {node.name!r} in {sourceDesc} must be >= {minValue}, got {value}"
             raise StoryParseError(msg)
         return value
     return None
@@ -181,13 +217,7 @@ def getDateField(
 ) -> tuple[dt.datetime, bool]:
     """Parse an ISO-8601 KDL date/date-time field, falling back to file mtime."""
     sourceDesc = str(fallbackPath)
-    nodes = findNodes(doc, *keys)
-    for node in reversed(nodes):
-        if not node.args:
-            continue
-        raw = node.args[0]
-        if raw is None or isinstance(raw, kdl.Null):
-            continue
+    for node, raw in _iterNonNullFirstArgs(doc, *keys):
         if isinstance(raw, dt.datetime):
             parsed = raw.replace(tzinfo=dt.UTC) if raw.tzinfo is None else raw.astimezone(dt.UTC)
             return (parsed, True)
@@ -197,14 +227,8 @@ def getDateField(
             cleaned = raw.strip()
             if not cleaned:
                 continue
-            normalized = cleaned.replace("Z", "+00:00")
-            try:
-                parsed = dt.datetime.fromisoformat(normalized)
-            except ValueError as exc:
-                msg = f"Invalid ISO date for KDL field {node.name!r} in {sourceDesc}: {cleaned!r}"
-                raise StoryParseError(msg) from exc
-            parsed = parsed.replace(tzinfo=dt.UTC) if parsed.tzinfo is None else parsed.astimezone(dt.UTC)
-            return (parsed, True)
+            errorMsg = f"Invalid ISO date for KDL field {node.name!r} in {sourceDesc}: {cleaned!r}"
+            return (parseIsoDateTime(cleaned, errorMsg), True)
         msg = f"Invalid date value for KDL field {node.name!r} in {sourceDesc}: {raw!r}"
         raise StoryParseError(msg)
 

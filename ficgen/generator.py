@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import re
 import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -13,25 +12,9 @@ from pathlib import Path
 from jinja2 import Environment, PackageLoader, select_autoescape
 
 from . import t
-from .kdlMeta import StoryParseError
-from .models import (
-    TAXONOMY_SPECS,
-    Archive,
-    SiteConfig,
-    Story,
-    TaxonomyBucket,
-    resolveFontStack,
-)
-
-_FONT_SERIF_RE: t.Final[re.Pattern[str]] = re.compile(r"(?m)^([ \t]*--font-serif:[ \t]*)([^;\n]+)(;)")
-_FONT_SANS_RE: t.Final[re.Pattern[str]] = re.compile(r"(?m)^([ \t]*--font-sans:[ \t]*)([^;\n]+)(;)")
-_FONT_MONO_RE: t.Final[re.Pattern[str]] = re.compile(r"(?m)^([ \t]*--font-mono:[ \t]*)([^;\n]+)(;)")
-_LAYER_ORDER_FULL: t.Final[str] = "@layer ficgen, site, work, chapter;"
-_LAYER_ORDER_REPLACE: t.Final[str] = "@layer site, work, chapter;"
-_LAYER_ORDER_LINE_RE: t.Final[re.Pattern[str]] = re.compile(r"(?m)^@layer ficgen, site, work, chapter;\n+")
-_IMPORT_LAYER_NAMED_RE: t.Final[re.Pattern[str]] = re.compile(r"^layer\(\s*([^)]+?)\s*\)", re.IGNORECASE)
-_IMPORT_LAYER_ANON_RE: t.Final[re.Pattern[str]] = re.compile(r"^layer(?=$|[\s;])", re.IGNORECASE)
-_STYLE_CLOSE_RE: t.Final[re.Pattern[str]] = re.compile(r"(?i)</(style)(?=[\s>/])")
+from .css import buildSiteStylesheet, buildStoryPageCss
+from .kdlMeta import StoryParseError, readUtf8File
+from .models import TAXONOMY_SPECS, Archive, SiteConfig, Story, TaxonomyBucket
 
 
 @dataclass(slots=True)
@@ -53,8 +36,7 @@ def _formatNumber(value: int) -> str:
 
 def _formatAtomTime(dt: datetime) -> str:
     """Format a timezone-aware datetime as RFC 3339 UTC for Atom 1.0."""
-    utc = dt.astimezone(UTC)
-    return utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _createJinjaEnv() -> Environment:
@@ -89,251 +71,32 @@ def _cleanStoryDir(storyOutDir: Path) -> None:
         storyOutDir.rmdir()
 
 
-def _replaceCssVar(cssText: str, pattern: re.Pattern[str], cssValue: str) -> str:
-    """Replace the first matching CSS custom property value in cssText."""
-
-    def _sub(match: re.Match[str]) -> str:
-        return f"{match.group(1)}{cssValue}{match.group(3)}"
-
-    return pattern.sub(_sub, cssText, count=1)
-
-
-def _applyFontConfig(cssText: str, config: SiteConfig) -> str:
-    """Substitute configured serif, sans, and mono font stacks into style.css."""
-    updated = _replaceCssVar(cssText, _FONT_SERIF_RE, resolveFontStack(config.fontSerif, role="serif"))
-    updated = _replaceCssVar(updated, _FONT_SANS_RE, resolveFontStack(config.fontSans, role="sans"))
-    return _replaceCssVar(updated, _FONT_MONO_RE, resolveFontStack(config.fontMono, role="mono"))
-
-
-def _skipCssQuoted(cssText: str, start: int) -> int:
-    """Return index immediately after the closing quote of a CSS string starting at start."""
-    quote = cssText[start]
-    pos = start + 1
-    length = len(cssText)
-    while pos < length:
-        ch = cssText[pos]
-        if ch == "\\":
-            pos += 2
-            continue
-        pos += 1
-        if ch == quote:
-            return pos
-    return length
-
-
-def _scanCssRuleEnd(cssText: str, start: int) -> int:
-    """Find the index immediately past the terminating ';' of an @-rule, respecting quotes and parens."""
-    pos = start
-    length = len(cssText)
-    parenDepth = 0
-    while pos < length:
-        ch = cssText[pos]
-        if ch in {"'", '"'}:
-            pos = _skipCssQuoted(cssText, pos)
-            continue
-        pos += 1
-        if ch == "(":
-            parenDepth += 1
-        elif ch == ")" and parenDepth > 0:
-            parenDepth -= 1
-        elif ch == ";" and parenDepth == 0:
-            return pos
-    return length
-
-
-def _indentCss(cssText: str, spaces: int = 2) -> str:
-    """Indent non-empty lines of CSS text by the given number of spaces."""
-    prefix = " " * spaces
-    return "\n".join(prefix + line if line.strip() else "" for line in cssText.strip().splitlines())
-
-
-def _wrapLayerBlock(layerName: str, cssBody: str) -> str:
-    """Wrap CSS rules inside `@layer <layerName> { ... }`."""
-    return f"@layer {layerName} {{\n{_indentCss(cssBody, 2)}\n}}"
-
-
-def _wrapScopedBlock(scopeSelector: str, cssBody: str) -> str:
-    """Wrap CSS rules inside `@scope (<scopeSelector>) { ... }`."""
-    return f"@scope ({scopeSelector}) {{\n{_indentCss(cssBody, 2)}\n}}"
-
-
-def _skipImportTarget(importRule: str, start: int) -> int:
-    """Return the index immediately past the <url> or <string> target of an @import rule."""
-    pos = start
-    length = len(importRule)
-    while pos < length and importRule[pos].isspace():
-        pos += 1
-    if pos >= length:
-        return pos
-    if importRule[pos] in {"'", '"'}:
-        return _skipCssQuoted(importRule, pos)
-    if importRule[pos : pos + 4].lower() == "url(":
-        pos += 4
-        while pos < length:
-            ch = importRule[pos]
-            if ch in {"'", '"'}:
-                pos = _skipCssQuoted(importRule, pos)
-                continue
-            pos += 1
-            if ch == ")":
-                return pos
-    return pos
-
-
-def _scopeImportToLayer(importRule: str, layerName: str) -> str:
-    """Insert or nest a `layer(...)` clause on an `@import` rule for the given layer."""
-    trimmed = importRule.strip()
-    if not trimmed.endswith(";"):
-        trimmed += ";"
-    afterTarget = _skipImportTarget(trimmed, len("@import"))
-    prefix = trimmed[:afterTarget]
-    rest = trimmed[afterTarget:].lstrip()
-
-    namedMatch = _IMPORT_LAYER_NAMED_RE.match(rest)
-    if namedMatch is not None:
-        existingLayer = namedMatch.group(1).strip()
-        tail = rest[namedMatch.end() :]
-        return f"{prefix} layer({layerName}.{existingLayer}){tail}"
-
-    anonMatch = _IMPORT_LAYER_ANON_RE.match(rest)
-    if anonMatch is not None:
-        tail = rest[anonMatch.end() :]
-        return f"{prefix} layer({layerName}){tail}"
-
-    if rest == ";":
-        return f"{prefix} layer({layerName});"
-    return f"{prefix} layer({layerName}) {rest}"
-
-
-def _extractLeadingImports(cssText: str) -> tuple[list[str], str]:
-    """Hoist any leading @import rules from CSS so they remain valid before layer blocks."""
-    imports: list[str] = []
-    pos = 0
-    lastImportEnd = 0
-    length = len(cssText)
-
-    while pos < length:
-        if cssText[pos].isspace():
-            pos += 1
-            continue
-        if cssText.startswith("/*", pos):
-            endComment = cssText.find("*/", pos + 2)
-            if endComment == -1:
-                break
-            pos = endComment + 2
-            continue
-        lowered = cssText[pos : pos + 9].lower()
-        if lowered.startswith("@charset"):
-            pos = _scanCssRuleEnd(cssText, pos)
-            lastImportEnd = pos
-            continue
-        if lowered.startswith("@import") and (pos + 7 == length or not cssText[pos + 7].isalnum()):
-            ruleEnd = _scanCssRuleEnd(cssText, pos)
-            imports.append(cssText[pos:ruleEnd].strip())
-            pos = ruleEnd
-            lastImportEnd = pos
-            continue
-        break
-
-    remaining = cssText[lastImportEnd:].lstrip("\r\n") if lastImportEnd > 0 else cssText
-    return (imports, remaining)
-
-
-def _extractLayerBlocks(
-    blocks: t.Sequence[str],
-    layerName: str,
-) -> tuple[list[str], str]:
-    """Extract layer-scoped @imports and combined CSS body from a sequence of CSS blocks."""
-    scopedImports: list[str] = []
-    bodies: list[str] = []
-    for block in blocks:
-        imports, body = _extractLeadingImports(block)
-        scopedImports.extend(_scopeImportToLayer(rule, layerName) for rule in imports)
-        if body.strip():
-            bodies.append(body.strip())
-    return (scopedImports, "\n\n".join(bodies))
-
-
-def _buildStoryPageCss(
-    archive: Archive,
-    workBlocks: t.Sequence[str],
-    chapterScopes: t.Sequence[tuple[str, t.Sequence[str]]] = (),
-) -> str:
-    """Assemble layered, @scope-wrapped CSS for a story or chapter page, or empty string if none."""
-    allImports: list[str] = []
-    layerSections: list[str] = []
-
-    workImports, workBody = _extractLayerBlocks(workBlocks, "work")
-    allImports.extend(workImports)
-    if workBody:
-        layerSections.append(_wrapLayerBlock("work", _wrapScopedBlock("article.work", workBody)))
-
-    chapterScopeBlocks: list[str] = []
-    for scopeSelector, blocks in chapterScopes:
-        chImports, chBody = _extractLayerBlocks(blocks, "chapter")
-        allImports.extend(chImports)
-        if chBody:
-            chapterScopeBlocks.append(_wrapScopedBlock(scopeSelector, chBody))
-    if chapterScopeBlocks:
-        layerSections.append(_wrapLayerBlock("chapter", "\n\n".join(chapterScopeBlocks)))
-
-    if not allImports and not layerSections:
-        return ""
-
-    layerDecl = _LAYER_ORDER_REPLACE if archive.config.customCssMode == "replace" else _LAYER_ORDER_FULL
-    header = layerDecl if not allImports else layerDecl + "\n" + "\n".join(allImports)
-    assembled = "\n\n".join([header, *layerSections])
-    return _STYLE_CLOSE_RE.sub(r"<\/\1", assembled)
-
-
-def _copyStylesheet(outputDir: Path, config: SiteConfig, written: list[Path]) -> None:
+def _writeStylesheet(outputDir: Path, config: SiteConfig, written: list[Path]) -> None:
     """Write the archive's style.css, applying font settings and any custom site stylesheet."""
     outCssPath = outputDir / "style.css"
-    customCssPath = config.customCssPath
+    customCss: str | None = None
 
-    if customCssPath is not None:
-        if not customCssPath.is_file():
-            msg = f"Custom CSS file does not exist: {customCssPath}"
+    if config.customCssPath is not None:
+        if not config.customCssPath.is_file():
+            msg = f"Custom CSS file does not exist: {config.customCssPath}"
             raise StoryParseError(msg)
-        if customCssPath.resolve() == outCssPath.resolve():
+        if config.customCssPath.resolve() == outCssPath.resolve():
             msg = (
                 f"Custom CSS path cannot be the same as the generated output stylesheet: {outCssPath} "
                 + "(use a separate source file such as site.css)."
             )
             raise StoryParseError(msg)
-        try:
-            customCss = customCssPath.read_text(encoding="utf-8")
-        except OSError as exc:
-            msg = f"Failed to read custom CSS file {customCssPath}: {exc}"
-            raise StoryParseError(msg) from exc
+        customCss = readUtf8File(config.customCssPath, label="custom CSS file")
 
-        siteImports, siteBody = _extractLayerBlocks((customCss,), "site")
-        if config.customCssMode == "replace":
-            header = _LAYER_ORDER_REPLACE if not siteImports else _LAYER_ORDER_REPLACE + "\n" + "\n".join(siteImports)
-            chunks = [header]
-            if siteBody:
-                chunks.append(_wrapLayerBlock("site", siteBody))
-            _writeTextFile(outCssPath, "\n\n".join(chunks) + "\n", written)
-            return
-
-        packagedCss = resources.files("ficgen").joinpath("static/style.css").read_text(encoding="utf-8")
-        baseCss = _applyFontConfig(packagedCss, config).rstrip()
-        chunks = []
-        if siteImports:
-            chunks.append(_LAYER_ORDER_FULL + "\n" + "\n".join(siteImports))
-            baseCss = _LAYER_ORDER_LINE_RE.sub("", baseCss, count=1)
-        chunks.append(baseCss)
-        if siteBody:
-            chunks.append(_wrapLayerBlock("site", siteBody))
-        _writeTextFile(outCssPath, "\n\n".join(chunks) + "\n", written)
-        return
-
-    if config.customCssMode == "replace":
-        msg = "Custom CSS mode is 'replace', but no custom CSS file was provided."
-        raise StoryParseError(msg)
-
-    cssText = resources.files("ficgen").joinpath("static/style.css").read_text(encoding="utf-8")
-    renderedCss = _applyFontConfig(cssText, config)
+    packagedCss = resources.files("ficgen").joinpath("static/style.css").read_text(encoding="utf-8")
+    renderedCss = buildSiteStylesheet(
+        packagedCss,
+        fontSerif=config.fontSerif,
+        fontSans=config.fontSans,
+        fontMono=config.fontMono,
+        customCss=customCss,
+        customCssMode=config.customCssMode,
+    )
     _writeTextFile(outCssPath, renderedCss, written)
 
 
@@ -353,7 +116,7 @@ def _renderSingleStory(
         metaDescription=story.summaryText,
         activeNav="",
         bodyClass="page-story page-story-single",
-        pageCss=_buildStoryPageCss(archive, story.cssBlocks),
+        pageCss=buildStoryPageCss(story.cssBlocks, customCssMode=archive.config.customCssMode),
     )
     _writeTextFile(archive.config.outputDir / story.slug / "index.html", html, written)
 
@@ -366,6 +129,7 @@ def _renderMultiChapterStory(
 ) -> int:
     """Generate TOC, per-chapter pages, and Entire Work view for a multi-chapter story."""
     storyOutDir = archive.config.outputDir / story.slug
+    cssMode = archive.config.customCssMode
 
     tocTemplate = env.get_template("story_toc.html")
     tocHtml = tocTemplate.render(
@@ -376,7 +140,7 @@ def _renderMultiChapterStory(
         metaDescription=story.summaryText,
         activeNav="",
         bodyClass="page-story page-story-toc",
-        pageCss=_buildStoryPageCss(archive, story.cssBlocks),
+        pageCss=buildStoryPageCss(story.cssBlocks, customCssMode=cssMode),
     )
     _writeTextFile(storyOutDir / "index.html", tocHtml, written)
 
@@ -397,7 +161,11 @@ def _renderMultiChapterStory(
             metaDescription=chapter.summaryText,
             activeNav="",
             bodyClass="page-story page-story-chapter",
-            pageCss=_buildStoryPageCss(archive, story.cssBlocks, (("article.work", chapter.cssBlocks),)),
+            pageCss=buildStoryPageCss(
+                story.cssBlocks,
+                (("article.work", chapter.cssBlocks),),
+                customCssMode=cssMode,
+            ),
         )
         _writeTextFile(storyOutDir / chapter.filename, chapterHtml, written)
 
@@ -410,10 +178,10 @@ def _renderMultiChapterStory(
         metaDescription=story.summaryText,
         activeNav="",
         bodyClass="page-story page-story-all",
-        pageCss=_buildStoryPageCss(
-            archive,
+        pageCss=buildStoryPageCss(
             story.cssBlocks,
             tuple((f"#ch-{chapter.number}", chapter.cssBlocks) for chapter in chapters),
+            customCssMode=cssMode,
         ),
     )
     _writeTextFile(storyOutDir / "all.html", allHtml, written)
@@ -495,7 +263,7 @@ def generateSite(archive: Archive) -> BuildResult:
     for slug in archive.allStorySlugs:
         _cleanStoryDir(outputDir / slug)
 
-    _copyStylesheet(outputDir, archive.config, written)
+    _writeStylesheet(outputDir, archive.config, written)
 
     indexTemplate = env.get_template("index.html")
     storyCount = len(archive.stories)

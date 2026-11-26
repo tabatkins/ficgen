@@ -180,3 +180,62 @@ def test_slugify_and_collision_disambiguation() -> None:
     assert slugMap["A/B"] != slugMap["A-B"]
     assert slugMap["A/B"].startswith("a-b-")
     assert slugMap["A-B"].startswith("a-b-")
+
+
+def test_parse_document_handles_empty_metadata_and_nested_example_fences() -> None:
+    """Empty metadata fences do not swallow prose, and 4-backtick fences protect nested examples."""
+    emptyMeta = "# Empty Meta\n\n```metadata\n```\n\nProse after empty fence.\n"
+    doc = parseMarkdownDocument(emptyMeta)
+    assert doc.title == "Empty Meta"
+    assert doc.bodyMd == "Prose after empty fence."
+
+    nestedExample = (
+        "# Docs Example\n\n"
+        + "````markdown\n"
+        + "```metadata\n"
+        + 'tags "not-a-tag"\n'
+        + "```\n\n"
+        + "```css\n"
+        + "p { color: red; }\n"
+        + "```\n\n"
+        + "<endnotes>Not an endnote.</endnotes>\n"
+        + "````\n\n"
+        + "Actual story prose.\n"
+    )
+    exampleDoc = parseMarkdownDocument(nestedExample)
+    assert not getListField(exampleDoc.metadata, "tags")
+    assert not exampleDoc.cssBlocks
+    assert exampleDoc.endnotesMd == ""
+    assert "p { color: red; }" in exampleDoc.bodyMd
+    assert "<endnotes>Not an endnote.</endnotes>" in exampleDoc.bodyMd
+    assert "Actual story prose." in exampleDoc.bodyMd
+
+
+def test_case_insensitive_taxonomy_tags_remain_visible_on_all_stories(tmp_path: Path) -> None:
+    """Stories sharing a tag with different casing merge into one bucket and both resolve TaxonomyItems."""
+    firstDir = tmp_path / "first"
+    firstDir.mkdir()
+    (firstDir / "index.md").write_text(
+        '# First\n\n```metadata\ntags "Slow Burn"\ndate "2026-09-02"\n```\n\nOne.\n',
+        encoding="utf-8",
+    )
+
+    secondDir = tmp_path / "second"
+    secondDir.mkdir()
+    (secondDir / "index.md").write_text(
+        '# Second\n\n```metadata\ntags "slow burn"\ndate "2026-09-01"\n```\n\nTwo.\n',
+        encoding="utf-8",
+    )
+
+    archive = loadArchive(SiteConfig(storiesDir=tmp_path, outputDir=tmp_path / "out"))
+    tagBuckets = archive.taxonomies["tags"]
+    assert len(tagBuckets) == 1
+    assert tagBuckets[0].item.name == "Slow Burn"
+    assert tagBuckets[0].item.slug == "slow-burn"
+    assert len(tagBuckets[0].stories) == 2
+
+    bySlug = {story.slug: story for story in archive.stories}
+    firstItems = archive.taxonomyItems(bySlug["first"], "tags")
+    secondItems = archive.taxonomyItems(bySlug["second"], "tags")
+    assert len(firstItems) == 1 and firstItems[0].slug == "slow-burn"
+    assert len(secondItems) == 1 and secondItems[0].slug == "slow-burn"

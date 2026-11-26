@@ -1,233 +1,45 @@
-"""Command-line interface for building the fiction archive and stamping dates."""
+"""Command-line interface for building, initializing, importing, and stamping fiction archives."""
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import logging
 import sys
 from pathlib import Path
 
 import ao3fetch
-import kdl
 
 from . import t
+from .config import loadSiteConfig, resolveDefaultPaths, resolveStoriesDir
 from .generator import BuildResult, generateSite
 from .importer import ImportOptions, importFromSource
-from .kdlMeta import (
-    StoryParseError,
-    coerceStringValue,
-    getBoolField,
-    getNodeStringArgs,
-    getStringField,
-    normalizeKey,
-    parseKdlDocument,
-)
-from .models import (
-    DEFAULT_CUSTOM_CSS_NAME,
-    DEFAULT_MONO_FONT,
-    DEFAULT_SANS_FONT,
-    DEFAULT_SERIF_FONT,
-    DEFAULT_STORIES_DIR_NAME,
-    SiteConfig,
-    formatFontArgs,
-    resolveFontStack,
-)
+from .kdlMeta import StoryParseError
+from .models import SiteConfig
 from .parser import loadArchive
 from .scaffolder import InitOptions, initSite, initStory
 from .stamper import StampResult, defaultTodayDate, stampStories
 
-_FONT_TOP_LEVEL_SLOTS: t.Final[dict[str, str]] = {
-    "font-serif": "serif",
-    "serif-font": "serif",
-    "font-sans": "sans",
-    "sans-font": "sans",
-    "font-mono": "mono",
-    "mono-font": "mono",
-}
-_FONT_BLOCK_SLOTS: t.Final[dict[str, str]] = {
-    "serif": "serif",
-    "sans": "sans",
-    "mono": "mono",
-    **_FONT_TOP_LEVEL_SLOTS,
-}
-_CSS_PATH_KEYS: t.Final[frozenset[str]] = frozenset({"css", "custom-css", "stylesheet"})
-_CSS_MODE_KEYS: t.Final[frozenset[str]] = frozenset({"css-mode", "custom-css-mode", "stylesheet-mode"})
 
-
-def _parseCssMode(rawMode: str, sourceDesc: str) -> t.CssMode:
-    """Validate a KDL CSS mode string ('append' or 'replace')."""
-    lowered = rawMode.strip().lower()
-    if lowered == "append":
-        return "append"
-    if lowered == "replace":
-        return "replace"
-    msg = f"Invalid CSS mode {rawMode!r} in {sourceDesc} (expected 'append' or 'replace')."
-    raise StoryParseError(msg)
-
-
-def _extractCustomCssConfig(
-    configDoc: kdl.Document,
-    configPath: Path | None,
-    defaultCssDir: Path,
-    sourceDesc: str,
-) -> tuple[Path | None, t.CssMode]:
-    """Extract optional custom CSS file path and append/replace mode from site.kdl or site.css."""
-    explicitPathStr: str | None = None
-    explicitDisabled = False
-    cssMode: t.CssMode = "append"
-
-    for node in configDoc.nodes:
-        key = normalizeKey(node.name)
-        if key in _CSS_PATH_KEYS:
-            if node.args:
-                first = node.args[0]
-                isDisabled = (
-                    first is None
-                    or isinstance(first, kdl.Null)
-                    or (isinstance(first, bool) and not first)
-                    or (isinstance(first, kdl.Bool) and not first.value)
-                )
-                if isDisabled:
-                    explicitPathStr = None
-                    explicitDisabled = True
-                else:
-                    val = coerceStringValue(first, node.name, sourceDesc)
-                    if val:
-                        explicitPathStr = val
-                        explicitDisabled = False
-                    else:
-                        explicitPathStr = None
-                        explicitDisabled = True
-            for propName, propVal in node.props.items():
-                if normalizeKey(propName) in {"mode", "css-mode"}:
-                    rawMode = coerceStringValue(propVal, propName, sourceDesc)
-                    if rawMode:
-                        cssMode = _parseCssMode(rawMode, sourceDesc)
-        elif key in _CSS_MODE_KEYS and node.args:
-            rawMode = coerceStringValue(node.args[0], node.name, sourceDesc)
-            if rawMode:
-                cssMode = _parseCssMode(rawMode, sourceDesc)
-
-    if explicitPathStr is not None:
-        rawPath = Path(explicitPathStr).expanduser()
-        baseDir = configPath.parent if configPath is not None else defaultCssDir
-        resolvedPath = rawPath if rawPath.is_absolute() else baseDir / rawPath
-        if not resolvedPath.is_file():
-            msg = f"Custom CSS file does not exist: {resolvedPath}"
-            raise StoryParseError(msg)
-        return (resolvedPath, cssMode)
-
-    if explicitDisabled:
-        if cssMode == "replace":
-            msg = f"CSS mode is 'replace' in {sourceDesc}, but custom CSS is disabled."
-            raise StoryParseError(msg)
-        return (None, cssMode)
-
-    candidate = defaultCssDir / DEFAULT_CUSTOM_CSS_NAME
-    if candidate.is_file():
-        return (candidate, cssMode)
-
-    if cssMode == "replace":
-        msg = (
-            f"CSS mode is 'replace' in {sourceDesc}, but no custom CSS file was found "
-            + f"(expected {candidate} or an explicit `css` path)."
-        )
-        raise StoryParseError(msg)
-    return (None, cssMode)
-
-
-def _extractFontConfig(configDoc: kdl.Document, sourceDesc: str) -> tuple[str, str, str]:
-    """Extract optional serif, sans, and mono font settings from site.kdl."""
-    slots: dict[str, str] = {"serif": "", "sans": "", "mono": ""}
-    for node in configDoc.nodes:
-        key = normalizeKey(node.name)
-        if key in {"fonts", "font"}:
-            for propName, propVal in node.props.items():
-                slot = _FONT_BLOCK_SLOTS.get(normalizeKey(propName))
-                if slot is not None:
-                    val = coerceStringValue(propVal, propName, sourceDesc)
-                    if val:
-                        slots[slot] = val
-            for child in node.nodes:
-                slot = _FONT_BLOCK_SLOTS.get(normalizeKey(child.name))
-                if slot is not None:
-                    val = formatFontArgs(getNodeStringArgs(child, sourceDesc))
-                    if val:
-                        slots[slot] = val
-        elif key in _FONT_TOP_LEVEL_SLOTS:
-            val = formatFontArgs(getNodeStringArgs(node, sourceDesc))
-            if val:
-                slots[_FONT_TOP_LEVEL_SLOTS[key]] = val
-
-    fontSerif = slots["serif"] or DEFAULT_SERIF_FONT
-    fontSans = slots["sans"] or DEFAULT_SANS_FONT
-    fontMono = slots["mono"] or DEFAULT_MONO_FONT
-    resolveFontStack(fontSerif, role="serif")
-    resolveFontStack(fontSans, role="sans")
-    resolveFontStack(fontMono, role="mono")
-    return (fontSerif, fontSans, fontMono)
-
-
-def _loadKdlConfig(configPath: Path) -> kdl.Document:
-    """Read an optional KDL site configuration file."""
-    try:
-        rawText = configPath.read_text(encoding="utf-8")
-    except OSError as exc:
-        msg = f"Failed to read config file {configPath}: {exc}"
-        raise StoryParseError(msg) from exc
-    return parseKdlDocument(rawText, sourceDesc=str(configPath))
-
-
-def _resolveSiteRoot() -> Path:
-    """Resolve the default site root from cwd or its parent directory."""
-    cwd = Path.cwd()
-    if (cwd / "site.kdl").is_file() or (cwd / DEFAULT_STORIES_DIR_NAME).is_dir():
-        return cwd
-    parent = cwd.parent
-    if (parent / "site.kdl").is_file() or (parent / DEFAULT_STORIES_DIR_NAME).is_dir():
-        return parent
-    return cwd
-
-
-def _resolveDefaultPaths() -> tuple[Path, Path]:
-    """Resolve default _stories/ and output directories from cwd or package layout."""
-    siteRoot = _resolveSiteRoot()
-    return (siteRoot / DEFAULT_STORIES_DIR_NAME, siteRoot)
-
-
-def _resolveStoriesPathFromConfig(configDoc: kdl.Document, configPath: Path) -> Path | None:
-    """Read an optional stories directory from a KDL site config, resolved relative to configPath."""
-    kdlStories = getStringField(
-        configDoc,
-        "stories",
-        "stories-dir",
-        "stories-directory",
-        sourceDesc=str(configPath),
+def _addStoriesAndConfigArgs(
+    parser: argparse.ArgumentParser,
+    defaultStories: Path,
+    *,
+    storiesHelpPrefix: str = "Directory containing story folders",
+) -> None:
+    """Attach shared `--stories` and `--config` options to a subcommand parser."""
+    parser.add_argument(
+        "--stories",
+        type=Path,
+        default=None,
+        help=f"{storiesHelpPrefix} (default: {defaultStories}, or site.kdl stories)",
     )
-    if not kdlStories:
-        return None
-    rawPath = Path(kdlStories).expanduser()
-    if rawPath.is_absolute():
-        return rawPath
-    return configPath.parent / rawPath
-
-
-def _resolveCliStoriesDir(cliStories: Path | None, cliConfig: Path | None) -> Path:
-    """Resolve storiesDir from explicit CLI flag, site.kdl, or default _stories/."""
-    if cliStories is not None:
-        return cliStories
-    defaultStories, defaultOutput = _resolveDefaultPaths()
-    configPath = cliConfig
-    if configPath is None:
-        candidate = defaultOutput / "site.kdl"
-        if candidate.is_file():
-            configPath = candidate
-    if configPath is not None:
-        configDoc = _loadKdlConfig(configPath)
-        configured = _resolveStoriesPathFromConfig(configDoc, configPath)
-        if configured is not None:
-            return configured
-    return defaultStories
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="Optional KDL configuration file (auto-loads site.kdl if present).",
+    )
 
 
 def _buildArgParser(defaultStories: Path, defaultOutput: Path) -> argparse.ArgumentParser:
@@ -245,23 +57,12 @@ def _buildArgParser(defaultStories: Path, defaultOutput: Path) -> argparse.Argum
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument(
-        "--stories",
-        type=Path,
-        default=None,
-        help=f"Directory containing story folders (default: {defaultStories}, or site.kdl stories)",
-    )
+    _addStoriesAndConfigArgs(parser, defaultStories)
     parser.add_argument(
         "--output",
         type=Path,
         default=defaultOutput,
         help=f"Output directory for generated HTML/CSS/feed (default: {defaultOutput})",
-    )
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=None,
-        help="Optional KDL configuration file (auto-loads site.kdl if present).",
     )
     parser.add_argument(
         "--title",
@@ -298,7 +99,7 @@ def _buildArgParser(defaultStories: Path, defaultOutput: Path) -> argparse.Argum
 
 def _stampArgParser() -> argparse.ArgumentParser:
     """Create the CLI argument parser for the `stamp` subcommand."""
-    defaultStories, _ = _resolveDefaultPaths()
+    defaultStories, _ = resolveDefaultPaths()
     parser = argparse.ArgumentParser(
         prog="ficgen stamp",
         description='Stamp `date "YYYY-MM-DD"` into KDL metadata blocks of undated story and chapter files.',
@@ -309,18 +110,7 @@ def _stampArgParser() -> argparse.ArgumentParser:
         type=Path,
         help="Optional file paths, story directories, or story slugs to stamp (defaults to all stories).",
     )
-    parser.add_argument(
-        "--stories",
-        type=Path,
-        default=None,
-        help=f"Directory containing story folders (default: {defaultStories}, or site.kdl stories)",
-    )
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=None,
-        help="Optional KDL configuration file (auto-loads site.kdl if present).",
-    )
+    _addStoriesAndConfigArgs(parser, defaultStories)
     parser.add_argument(
         "--date",
         type=str,
@@ -367,16 +157,12 @@ def _initArgParser() -> argparse.ArgumentParser:
 
 def _newArgParser() -> argparse.ArgumentParser:
     """Create the CLI argument parser for the `new` subcommand."""
-    defaultStories, _ = _resolveDefaultPaths()
+    defaultStories, _ = resolveDefaultPaths()
     parser = argparse.ArgumentParser(
         prog="ficgen new",
         description="Initialize a new story directory with KDL metadata and starter Markdown files.",
     )
-    parser.add_argument(
-        "title",
-        type=str,
-        help="Title of the new story.",
-    )
+    parser.add_argument("title", type=str, help="Title of the new story.")
     parser.add_argument(
         "--slug",
         type=str,
@@ -408,54 +194,23 @@ def _newArgParser() -> argparse.ArgumentParser:
         default="",
         help="Optional ISO-8601 publication date (YYYY-MM-DD).",
     )
-    parser.add_argument(
-        "--fandom",
-        action="append",
-        default=[],
-        help="Fandom tag (repeatable).",
-    )
+    parser.add_argument("--fandom", action="append", default=[], help="Fandom tag (repeatable).")
     parser.add_argument(
         "--category",
         action="append",
         default=[],
         help="Relationship category such as F/F (repeatable).",
     )
-    parser.add_argument(
-        "--relationship",
-        action="append",
-        default=[],
-        help="Relationship / ship tag (repeatable).",
-    )
-    parser.add_argument(
-        "--character",
-        action="append",
-        default=[],
-        help="Character tag (repeatable).",
-    )
-    parser.add_argument(
-        "--tag",
-        action="append",
-        default=[],
-        help="Additional freeform tag (repeatable).",
-    )
-    parser.add_argument(
-        "--stories",
-        type=Path,
-        default=None,
-        help=f"Directory containing story folders (default: {defaultStories}, or site.kdl stories)",
-    )
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=None,
-        help="Optional KDL configuration file (auto-loads site.kdl if present).",
-    )
+    parser.add_argument("--relationship", action="append", default=[], help="Relationship / ship tag (repeatable).")
+    parser.add_argument("--character", action="append", default=[], help="Character tag (repeatable).")
+    parser.add_argument("--tag", action="append", default=[], help="Additional freeform tag (repeatable).")
+    _addStoriesAndConfigArgs(parser, defaultStories)
     return parser
 
 
 def _importArgParser() -> argparse.ArgumentParser:
     """Create the CLI argument parser for the `import` subcommand."""
-    defaultStories, _ = _resolveDefaultPaths()
+    defaultStories, _ = resolveDefaultPaths()
     parser = argparse.ArgumentParser(
         prog="ficgen import",
         description="Import one or more works from AO3, AO3-compatible archives, or downloaded AO3 EPUBs.",
@@ -478,18 +233,7 @@ def _importArgParser() -> argparse.ArgumentParser:
         default="",
         help="Custom story directory/URL slug (only valid when importing a single work).",
     )
-    parser.add_argument(
-        "--stories",
-        type=Path,
-        default=None,
-        help=f"Destination stories directory (default: {defaultStories}, or site.kdl stories)",
-    )
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=None,
-        help="Optional KDL configuration file (auto-loads site.kdl if present).",
-    )
+    _addStoriesAndConfigArgs(parser, defaultStories, storiesHelpPrefix="Destination stories directory")
     parser.add_argument(
         "--draft",
         action="store_true",
@@ -513,58 +257,18 @@ def _importArgParser() -> argparse.ArgumentParser:
 
 def buildConfigFromArgs(argv: t.Sequence[str] | None = None) -> SiteConfig:
     """Parse CLI arguments and optional KDL site config into a SiteConfig."""
-    defaultStories, defaultOutput = _resolveDefaultPaths()
+    defaultStories, defaultOutput = resolveDefaultPaths()
     parser = _buildArgParser(defaultStories, defaultOutput)
     args = parser.parse_args(argv)
-
-    cliStories: Path | None = args.stories
-    outputDir: Path = args.output
-    configPath: Path | None = args.config
-    if configPath is None:
-        candidateRoot = cliStories.parent if cliStories is not None else defaultOutput
-        candidate = candidateRoot / "site.kdl"
-        if candidate.is_file():
-            configPath = candidate
-
-    configDoc = kdl.Document()
-    configSource = "<config>"
-    configuredStories: Path | None = None
-    if configPath is not None:
-        configDoc = _loadKdlConfig(configPath)
-        configSource = str(configPath)
-        configuredStories = _resolveStoriesPathFromConfig(configDoc, configPath)
-
-    storiesDir = cliStories if cliStories is not None else (configuredStories or defaultStories)
-
-    def _strOpt(cliVal: str | None, kdlKey: str, fallback: str) -> str:
-        if cliVal is not None:
-            return cliVal
-        kdlVal = getStringField(configDoc, kdlKey, sourceDesc=configSource)
-        return kdlVal or fallback
-
-    kdlDrafts = getBoolField(configDoc, "include-drafts", default=False, sourceDesc=configSource)
-    includeDrafts = bool(args.drafts) or kdlDrafts
-    localBrowsing = getBoolField(configDoc, "local-browsing", default=True, sourceDesc=configSource)
-    fontSerif, fontSans, fontMono = _extractFontConfig(configDoc, configSource)
-    defaultCssDir = (
-        configPath.parent if configPath is not None else (cliStories.parent if cliStories else defaultOutput)
-    )
-    customCssPath, customCssMode = _extractCustomCssConfig(configDoc, configPath, defaultCssDir, configSource)
-
-    return SiteConfig(
-        storiesDir=storiesDir,
-        outputDir=outputDir,
-        title=_strOpt(args.title, "title", "Fiction Archive"),
-        subtitle=_strOpt(args.subtitle, "subtitle", ""),
-        author=_strOpt(args.author, "author", ""),
-        baseUrl=_strOpt(args.base_url, "base-url", "https://example.com/"),
-        includeDrafts=includeDrafts,
-        localBrowsing=localBrowsing,
-        fontSerif=fontSerif,
-        fontSans=fontSans,
-        fontMono=fontMono,
-        customCssPath=customCssPath,
-        customCssMode=customCssMode,
+    return loadSiteConfig(
+        storiesDir=args.stories,
+        outputDir=args.output,
+        configPath=args.config,
+        title=args.title,
+        subtitle=args.subtitle,
+        author=args.author,
+        baseUrl=args.base_url,
+        includeDrafts=bool(args.drafts),
     )
 
 
@@ -596,9 +300,8 @@ def _printStampSummary(result: StampResult) -> None:
 
 def _runStamp(argv: t.Sequence[str]) -> int:
     """Execute the `ficgen stamp` subcommand."""
-    parser = _stampArgParser()
-    args = parser.parse_args(argv)
-    storiesDir = _resolveCliStoriesDir(args.stories, args.config)
+    args = _stampArgParser().parse_args(argv)
+    storiesDir = resolveStoriesDir(args.stories, args.config)
     dateValue: str = args.date if args.date is not None else defaultTodayDate()
     result = stampStories(
         storiesDir=storiesDir,
@@ -614,8 +317,7 @@ def _runStamp(argv: t.Sequence[str]) -> int:
 
 def _runInit(argv: t.Sequence[str]) -> int:
     """Execute the `ficgen init` subcommand."""
-    parser = _initArgParser()
-    args = parser.parse_args(argv)
+    args = _initArgParser().parse_args(argv)
     targetDir: Path = args.directory if args.directory is not None else Path.cwd()
     result = initSite(targetDir)
     print(f"Initialized a new ficgen archive in {result.siteDir}:")
@@ -632,9 +334,8 @@ def _runInit(argv: t.Sequence[str]) -> int:
 
 def _runNew(argv: t.Sequence[str]) -> int:
     """Execute the `ficgen new` subcommand."""
-    parser = _newArgParser()
-    args = parser.parse_args(argv)
-    storiesDir = _resolveCliStoriesDir(args.stories, args.config)
+    args = _newArgParser().parse_args(argv)
+    storiesDir = resolveStoriesDir(args.stories, args.config)
     options = InitOptions(
         storiesDir=storiesDir,
         title=args.title,
@@ -656,48 +357,67 @@ def _runNew(argv: t.Sequence[str]) -> int:
     return 0
 
 
+def mergeCookieHeader(existing: str, extraCookie: str) -> str:
+    """Combine an existing HTTP Cookie header value with an additional cookie string."""
+    cleanedExisting = existing.strip().rstrip(";").strip()
+    cleanedExtra = extraCookie.strip().lstrip(";").strip()
+    if cleanedExisting and cleanedExtra:
+        return f"{cleanedExisting}; {cleanedExtra}"
+    return cleanedExtra or cleanedExisting
+
+
 def _makeCookieFetcher(baseFetcher: ao3fetch.Fetcher, extraCookie: str) -> ao3fetch.Fetcher:
     """Return a fetcher that appends an extra Cookie header to every request."""
 
     def _wrapped(url: str, headers: t.Mapping[str, str] | None = None) -> ao3fetch.FetchResponse:
         merged = dict(headers) if headers else {}
-        existing = merged.get("Cookie", "").strip()
-        merged["Cookie"] = f"{existing} {extraCookie}".strip() if existing else extraCookie
+        combined = mergeCookieHeader(merged.get("Cookie", ""), extraCookie)
+        if combined:
+            merged["Cookie"] = combined
         return baseFetcher(url, merged)
 
     return _wrapped
 
 
+@contextlib.contextmanager
+def _configuredAo3Fetcher(cookie: str) -> t.Iterator[None]:
+    """Temporarily wrap ao3fetch's default fetcher with caching, retries, and optional cookies."""
+    logger = logging.getLogger("ficgen.importer")
+    previousFetcher = ao3fetch.getFetcher()
+    if previousFetcher is not ao3fetch.defaultFetch and not cookie:
+        yield
+        return
+
+    base: ao3fetch.Fetcher = _makeCookieFetcher(previousFetcher, cookie) if cookie else previousFetcher
+
+    def _logRetry(event: ao3fetch.RetryEvent) -> None:
+        statusDesc = f"HTTP {event.response.status}" if event.response is not None else str(event.error)
+        logger.warning(
+            "Retry %d in %.1fs after %s",
+            event.attempt,
+            event.delaySeconds,
+            statusDesc,
+        )
+
+    ao3fetch.setFetcher(ao3fetch.withCache(ao3fetch.withRetry(base, onRetry=_logRetry)))
+    try:
+        yield
+    finally:
+        if previousFetcher is ao3fetch.defaultFetch:
+            ao3fetch.resetFetcher()
+        else:
+            ao3fetch.setFetcher(previousFetcher)
+
+
 def _runImport(argv: t.Sequence[str]) -> int:
     """Execute the `ficgen import` subcommand."""
-    parser = _importArgParser()
-    args = parser.parse_args(argv)
+    args = _importArgParser().parse_args(argv)
     if args.slug and len(args.sources) > 1:
         msg = "--slug can only be used when importing a single work."
         raise StoryParseError(msg)
 
-    storiesDir = _resolveCliStoriesDir(args.stories, args.config)
-    logger = logging.getLogger("ficgen.importer")
-    previousFetcher = ao3fetch.getFetcher()
-    installedCustom = False
-    if previousFetcher is ao3fetch.defaultFetch or args.cookie:
-        base: ao3fetch.Fetcher = previousFetcher
-        if args.cookie:
-            base = _makeCookieFetcher(base, args.cookie)
-
-        def _logRetry(event: ao3fetch.RetryEvent) -> None:
-            statusDesc = f"HTTP {event.response.status}" if event.response is not None else str(event.error)
-            logger.warning(
-                "Retry %d in %.1fs after %s",
-                event.attempt,
-                event.delaySeconds,
-                statusDesc,
-            )
-
-        ao3fetch.setFetcher(ao3fetch.withCache(ao3fetch.withRetry(base, onRetry=_logRetry)))
-        installedCustom = True
-
-    try:
+    storiesDir = resolveStoriesDir(args.stories, args.config)
+    with _configuredAo3Fetcher(args.cookie):
         for source in args.sources:
             options = ImportOptions(
                 storiesDir=storiesDir,
@@ -711,13 +431,22 @@ def _runImport(argv: t.Sequence[str]) -> int:
             print(f"Imported '{result.title}'{chapterNote} -> {result.storyDir}")
             for createdPath in result.createdFiles:
                 print(f"  {createdPath}")
-    finally:
-        if installedCustom:
-            if previousFetcher is ao3fetch.defaultFetch:
-                ao3fetch.resetFetcher()
-            else:
-                ao3fetch.setFetcher(previousFetcher)
 
+    return 0
+
+
+def _runBuild(argv: t.Sequence[str]) -> int:
+    """Execute the default `ficgen [build]` subcommand."""
+    config = buildConfigFromArgs(argv)
+    result = buildArchive(config)
+    draftNote = " (including drafts)" if config.includeDrafts else ""
+    print(
+        f"Built {result.storyCount} stories"
+        + f" ({result.chapterPageCount} chapter pages,"
+        + f" {result.taxonomyPageCount} tag pages,"
+        + f" {result.feedEntryCount} feed entries){draftNote}"
+        + f" -> {result.outputDir}",
+    )
     return 0
 
 
@@ -737,27 +466,19 @@ def main(argv: t.Sequence[str] | None = None) -> int:
     _configureLogging()
     rawArgs = list(sys.argv[1:] if argv is None else argv)
     try:
-        if rawArgs and rawArgs[0] == "stamp":
-            return _runStamp(rawArgs[1:])
-        if rawArgs and rawArgs[0] == "init":
-            return _runInit(rawArgs[1:])
-        if rawArgs and rawArgs[0] == "new":
-            return _runNew(rawArgs[1:])
-        if rawArgs and rawArgs[0] == "import":
-            return _runImport(rawArgs[1:])
-        buildArgs = rawArgs[1:] if rawArgs and rawArgs[0] == "build" else rawArgs
-        config = buildConfigFromArgs(buildArgs)
-        result = buildArchive(config)
+        match rawArgs:
+            case ["stamp", *rest]:
+                return _runStamp(rest)
+            case ["init", *rest]:
+                return _runInit(rest)
+            case ["new", *rest]:
+                return _runNew(rest)
+            case ["import", *rest]:
+                return _runImport(rest)
+            case ["build", *rest]:
+                return _runBuild(rest)
+            case _:
+                return _runBuild(rawArgs)
     except StoryParseError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
-
-    draftNote = " (including drafts)" if config.includeDrafts else ""
-    print(
-        f"Built {result.storyCount} stories"
-        + f" ({result.chapterPageCount} chapter pages,"
-        + f" {result.taxonomyPageCount} tag pages,"
-        + f" {result.feedEntryCount} feed entries){draftNote}"
-        + f" -> {result.outputDir}",
-    )
-    return 0

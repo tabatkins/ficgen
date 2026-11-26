@@ -13,7 +13,9 @@ import pytest
 
 from ficgen import t
 from ficgen.cli import buildConfigFromArgs, main
+from ficgen.css import buildSiteStylesheet, buildStoryPageCss
 from ficgen.generator import generateSite
+from ficgen.kdlMeta import StoryParseError
 from ficgen.models import FONT_PRESETS, SiteConfig, resolveFontStack
 from ficgen.parser import loadArchive
 
@@ -825,3 +827,33 @@ def test_work_skins_and_chapter_css_layers_imports_inline_and_scope(tmp_path: Pa
     assert "@scope (#ch-1) {" in allHtml
     assert "@scope (#ch-2) {" in allHtml
     assert allHtml.index("saga-work.css") < allHtml.index("ch1-ext.css") < allHtml.index("ch1-inline.css")
+
+
+def test_css_scanners_handle_comments_at_keyword_boundaries_and_layer_overrides() -> None:
+    """CSS hoisting handles comments in @import, preserves @import-* rules, and avoids !important in @layer ficgen."""
+    packagedCss = resources.files("ficgen").joinpath("static/style.css").read_text(encoding="utf-8")
+    assert "!important" not in packagedCss
+
+    customCss = (
+        '@import /* note; with semicolon */ "https://example.com/a.css";\n'
+        + "@import-custom foo;\n"
+        + "body { color: navy; }\n"
+    )
+    rendered = buildSiteStylesheet(
+        packagedCss,
+        fontSerif="old-style",
+        fontSans="neogrotesque",
+        fontMono="mono-code",
+        customCss=customCss,
+        customCssMode="replace",
+    )
+    assert '@import /* note; with semicolon */ "https://example.com/a.css" layer(site);' in rendered
+    assert "@layer site {\n  @import-custom foo;" in rendered
+
+    pageCss = buildStoryPageCss(("p { color: red; }",), customCssMode="append")
+    assert "@layer work {\n  @scope (article.work) {\n    p { color: red; }\n  }\n}" in pageCss
+
+    with pytest.raises(StoryParseError, match="unterminated '\\('"):
+        resolveFontStack("var(--font-serif", role="serif")
+    with pytest.raises(StoryParseError, match="unmatched '\\)'"):
+        resolveFontStack("Georgia), serif", role="serif")

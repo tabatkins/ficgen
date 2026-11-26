@@ -778,10 +778,14 @@
 
   .chat-msg {
     max-inline-size: 82%;
-    margin: 0 !important;
+    margin: 0;
     padding: 0.55rem 0.9rem;
     word-wrap: break-word;
     text-wrap: pretty;
+  }
+
+  .prose .chat > .chat-msg {
+    margin: 0;
   }
 
   .chat-left {

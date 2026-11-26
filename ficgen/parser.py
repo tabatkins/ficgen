@@ -19,6 +19,7 @@ from .kdlMeta import (
     getStringField,
     mergeDocuments,
     parseKdlDocument,
+    readUtf8File,
 )
 from .markdownExt import MarkdownRenderer, countWords, makeExcerpt, stripHtmlTags
 from .models import (
@@ -35,24 +36,44 @@ from .models import (
 
 _LOG: t.Final[logging.Logger] = logging.getLogger(__name__)
 _TITLE_LINE_RE: t.Final[re.Pattern[str]] = re.compile(r"^#\s+(.+?)\s*$")
-_METADATA_FENCE_RE: t.Final[re.Pattern[str]] = re.compile(
-    r"(?ms)^```metadata(?:[ \t]+kdl)?[ \t]*\n(.*?)\n```[ \t]*\n?",
-)
-_CSS_FENCE_RE: t.Final[re.Pattern[str]] = re.compile(
-    r"(?ms)^```css[ \t]*\n(.*?)^```[ \t]*\n?",
-)
-_LEADING_KDL_FENCE_RE: t.Final[re.Pattern[str]] = re.compile(
-    r"(?ms)\A[ \t\n]*```kdl[ \t]*\n(.*?)\n```[ \t]*\n?",
-)
-_CODE_FENCE_SPLIT_RE: t.Final[re.Pattern[str]] = re.compile(
-    r"(?ms)(^```[^\n]*\n.*?^```[ \t]*$)",
-)
+_OPEN_FENCE_RE: t.Final[re.Pattern[str]] = re.compile(r"^(?P<marker>`{3,}|~{3,})(?P<info>.*)$")
+_METADATA_INFO_RE: t.Final[re.Pattern[str]] = re.compile(r"^metadata(?:[ \t]+kdl)?$", re.IGNORECASE)
 _SPECIAL_TAG_RE: t.Final[re.Pattern[str]] = re.compile(
     r"(?is)<(notes|startnotes|beginnotes|endnotes|summary)>(.*?)</\1>",
 )
 _CHAPTER_FILE_RE: t.Final[re.Pattern[str]] = re.compile(r"^ch(\d+)\.md$", re.IGNORECASE)
 _NATURAL_SPLIT_RE: t.Final[re.Pattern[str]] = re.compile(r"(\d+)")
 _STORY_KDL_NAMES: t.Final[tuple[str, ...]] = ("story.kdl", "meta.kdl", "index.kdl")
+
+_NOTES_KEYS: t.Final[tuple[str, ...]] = ("notes", "startnotes", "beginnotes")
+_DATE_KEYS: t.Final[tuple[str, ...]] = ("date", "published-date")
+_UPDATED_KEYS: t.Final[tuple[str, ...]] = ("updated", "updated-date")
+_TAXONOMY_FIELD_KEYS: t.Final[dict[t.TaxonomyKind, tuple[str, ...]]] = {
+    "fandoms": ("fandoms", "fandom"),
+    "categories": ("relationship-categories", "categories", "category"),
+    "relationships": ("relationships", "relationship", "ships"),
+    "characters": ("characters", "character"),
+    "tags": ("tags", "tag", "additional-tags"),
+}
+
+
+class LeadingTitle(t.NamedTuple):
+    """Leading `# Heading` extracted from a normalized (LF) Markdown document."""
+
+    title: str
+    contentStart: int
+
+
+class FencedBlock(t.NamedTuple):
+    """A CommonMark fenced code block located inside a normalized (LF) Markdown document."""
+
+    info: str
+    body: str
+    start: int
+    end: int
+    bodyStart: int
+    bodyEnd: int
+    isLeading: bool
 
 
 @dataclass(slots=True)
@@ -68,11 +89,134 @@ class ParsedDocument:
     cssBlocks: tuple[str, ...] = ()
 
 
-def _extractSpecialBlocks(text: str) -> tuple[str, list[str], list[str], list[str]]:
-    """Extract <summary>, <notes>, and <endnotes> blocks outside fenced code blocks."""
-    summaries: list[str] = []
-    notes: list[str] = []
-    endnotes: list[str] = []
+@dataclass(slots=True)
+class _StoryHeader:
+    """Whole-work metadata loaded for a multi-chapter story before loading individual chapters."""
+
+    metaSourcePath: Path
+    sourceDesc: str
+    metadata: kdl.Document
+    title: str
+    summaryMd: str
+    notesMd: str
+    endnotesMd: str
+    indexCssBlocks: tuple[str, ...] = ()
+    preloadedFirstChapter: ParsedDocument | None = None
+
+
+def normalizeLineEndings(rawText: str) -> str:
+    """Normalize CRLF and CR line endings to LF."""
+    return rawText.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def splitLeadingTitle(normalized: str) -> LeadingTitle:
+    """Extract an optional leading `# Title` line after any leading blank lines."""
+    pos = 0
+    for line in normalized.splitlines(keepends=True):
+        lineEnd = pos + len(line)
+        stripped = line.rstrip("\n")
+        if not stripped.strip():
+            pos = lineEnd
+            continue
+        titleMatch = _TITLE_LINE_RE.match(stripped)
+        if titleMatch is not None:
+            return LeadingTitle(title=titleMatch.group(1).strip(), contentStart=lineEnd)
+        return LeadingTitle(title="", contentStart=pos)
+    return LeadingTitle(title="", contentStart=len(normalized))
+
+
+def scanFencedBlocks(normalized: str, *, startPos: int = 0) -> list[FencedBlock]:
+    """Scan CommonMark backtick/tilde fenced code blocks starting at startPos."""
+    blocks: list[FencedBlock] = []
+    pos = startPos
+    seenNonEmpty = False
+
+    lines = normalized[startPos:].splitlines(keepends=True)
+    idx = 0
+    while idx < len(lines):
+        line = lines[idx]
+        lineEnd = pos + len(line)
+        content = line.rstrip("\n")
+
+        openMatch = _OPEN_FENCE_RE.match(content)
+        if openMatch is not None:
+            marker = openMatch.group("marker")
+            info = openMatch.group("info").strip()
+            fenceChar = marker[0]
+            # Per CommonMark, backtick fence info strings cannot contain backticks.
+            if fenceChar == "`" and "`" in info:
+                seenNonEmpty = True
+                pos = lineEnd
+                idx += 1
+                continue
+
+            isLeading = not seenNonEmpty
+            seenNonEmpty = True
+            blockStart = pos
+            bodyStart = lineEnd
+            fenceLen = len(marker)
+
+            scanPos = lineEnd
+            scanIdx = idx + 1
+            closed = False
+            while scanIdx < len(lines):
+                scanLine = lines[scanIdx]
+                scanLineEnd = scanPos + len(scanLine)
+                trimmed = scanLine.rstrip("\n").rstrip(" \t")
+                if len(trimmed) >= fenceLen and trimmed == fenceChar * len(trimmed):
+                    blocks.append(
+                        FencedBlock(
+                            info=info,
+                            body=normalized[bodyStart:scanPos],
+                            start=blockStart,
+                            end=scanLineEnd,
+                            bodyStart=bodyStart,
+                            bodyEnd=scanPos,
+                            isLeading=isLeading,
+                        ),
+                    )
+                    pos = scanLineEnd
+                    idx = scanIdx + 1
+                    closed = True
+                    break
+                scanPos = scanLineEnd
+                scanIdx += 1
+
+            if not closed:
+                # Unclosed fence runs to EOF in CommonMark; stop scanning.
+                break
+            continue
+
+        if content.strip():
+            seenNonEmpty = True
+        pos = lineEnd
+        idx += 1
+
+    return blocks
+
+
+def isMetadataFence(block: FencedBlock) -> bool:
+    """Return True if a fenced block holds ficgen KDL metadata."""
+    if _METADATA_INFO_RE.match(block.info) is not None:
+        return True
+    return block.isLeading and block.info.lower() == "kdl"
+
+
+def findMetadataFences(normalized: str) -> tuple[LeadingTitle, list[FencedBlock]]:
+    """Locate leading title and all KDL metadata fences in a normalized Markdown document."""
+    leading = splitLeadingTitle(normalized)
+    blocks = scanFencedBlocks(normalized, startPos=leading.contentStart)
+    metaBlocks = [block for block in blocks if isMetadataFence(block)]
+    return (leading, metaBlocks)
+
+
+def _extractSpecialFromSegment(
+    segment: str,
+    summaries: list[str],
+    notes: list[str],
+    endnotes: list[str],
+) -> str:
+    """Extract <summary>, <notes>, and <endnotes> tags from a prose segment outside code fences."""
 
     def _replaceTag(match: re.Match[str]) -> str:
         tag = match.group(1).lower()
@@ -87,71 +231,49 @@ def _extractSpecialBlocks(text: str) -> tuple[str, list[str], list[str], list[st
                     endnotes.append(inner)
         return ""
 
-    segments = _CODE_FENCE_SPLIT_RE.split(text)
-    cleanedSegments: list[str] = []
-    for index, segment in enumerate(segments):
-        if index % 2 == 1:
-            cleanedSegments.append(segment)
-        else:
-            cleanedSegments.append(_SPECIAL_TAG_RE.sub(_replaceTag, segment))
-
-    return "".join(cleanedSegments), summaries, notes, endnotes
+    return _SPECIAL_TAG_RE.sub(_replaceTag, segment)
 
 
 def parseMarkdownDocument(rawText: str, sourceDesc: str = "<markdown>") -> ParsedDocument:
-    """Parse title, KDL metadata block, author's notes, summary, and body from Markdown text."""
-    normalized = rawText.replace("\r\n", "\n").replace("\r", "\n")
-    lines = normalized.split("\n")
-
-    title = ""
-    firstNonEmpty = 0
-    while firstNonEmpty < len(lines) and not lines[firstNonEmpty].strip():
-        firstNonEmpty += 1
-
-    if firstNonEmpty < len(lines):
-        titleMatch = _TITLE_LINE_RE.match(lines[firstNonEmpty])
-        if titleMatch is not None:
-            title = titleMatch.group(1).strip()
-            remaining = "\n".join(lines[firstNonEmpty + 1 :])
-        else:
-            remaining = "\n".join(lines[firstNonEmpty:])
-    else:
-        remaining = ""
+    """Parse title, KDL metadata blocks, inline CSS blocks, author's notes, summary, and body."""
+    normalized = normalizeLineEndings(rawText)
+    leading = splitLeadingTitle(normalized)
+    blocks = scanFencedBlocks(normalized, startPos=leading.contentStart)
 
     metaDocs: list[kdl.Document] = []
-
-    leadingMatch = _LEADING_KDL_FENCE_RE.match(remaining)
-    if leadingMatch is not None:
-        metaDocs.append(parseKdlDocument(leadingMatch.group(1), sourceDesc))
-        remaining = remaining[leadingMatch.end() :]
-
-    def _consumeMetadata(match: re.Match[str]) -> str:
-        metaDocs.append(parseKdlDocument(match.group(1), sourceDesc))
-        return ""
-
-    withoutMeta = _METADATA_FENCE_RE.sub(_consumeMetadata, remaining)
-
     cssBlocks: list[str] = []
+    summaries: list[str] = []
+    notes: list[str] = []
+    endnotes: list[str] = []
+    proseChunks: list[str] = []
 
-    def _consumeCss(match: re.Match[str]) -> str:
-        cssText = match.group(1).strip()
-        if cssText:
-            cssBlocks.append(cssText)
-        return ""
+    cursor = leading.contentStart
+    for block in blocks:
+        if block.start > cursor:
+            proseChunks.append(
+                _extractSpecialFromSegment(normalized[cursor : block.start], summaries, notes, endnotes),
+            )
+        if isMetadataFence(block):
+            metaDocs.append(parseKdlDocument(block.body, sourceDesc))
+        elif block.info.lower() == "css":
+            cssText = block.body.strip()
+            if cssText:
+                cssBlocks.append(cssText)
+        else:
+            proseChunks.append(normalized[block.start : block.end])
+        cursor = block.end
 
-    withoutCss = _CSS_FENCE_RE.sub(_consumeCss, withoutMeta)
+    if cursor < len(normalized):
+        proseChunks.append(_extractSpecialFromSegment(normalized[cursor:], summaries, notes, endnotes))
+
     metadata = mergeDocuments(*metaDocs)
-    bodyRaw, summaries, notes, endnotes = _extractSpecialBlocks(withoutCss)
-
-    metaTitle = getStringField(metadata, "title", sourceDesc=sourceDesc)
-    if metaTitle:
-        title = metaTitle
+    title = getStringField(metadata, "title", sourceDesc=sourceDesc) or leading.title
 
     metaSummary = getStringField(metadata, "summary", sourceDesc=sourceDesc)
     if metaSummary:
         summaries.insert(0, metaSummary)
 
-    metaNotes = getStringField(metadata, "notes", "startnotes", "beginnotes", sourceDesc=sourceDesc)
+    metaNotes = getStringField(metadata, *_NOTES_KEYS, sourceDesc=sourceDesc)
     if metaNotes:
         notes.insert(0, metaNotes)
 
@@ -165,9 +287,17 @@ def parseMarkdownDocument(rawText: str, sourceDesc: str = "<markdown>") -> Parse
         summaryMd="\n\n".join(summaries).strip(),
         notesMd="\n\n".join(notes).strip(),
         endnotesMd="\n\n".join(endnotes).strip(),
-        bodyMd=bodyRaw.strip(),
+        bodyMd="".join(proseChunks).strip(),
         cssBlocks=tuple(cssBlocks),
     )
+
+
+def _extractTaxonomyFields(
+    meta: kdl.Document,
+    sourceDesc: str,
+) -> dict[t.TaxonomyKind, t.MetadataList]:
+    """Extract all five taxonomy tag lists from a KDL metadata document."""
+    return {kind: getListField(meta, *keys, sourceDesc=sourceDesc) for kind, keys in _TAXONOMY_FIELD_KEYS.items()}
 
 
 def _mergeLists(*lists: t.MetadataList) -> t.MetadataList:
@@ -198,11 +328,7 @@ def _readOptionalCssFile(cssPath: Path) -> str | None:
     """Read a UTF-8 CSS file if it exists and is non-empty."""
     if not cssPath.is_file():
         return None
-    try:
-        text = cssPath.read_text(encoding="utf-8")
-    except OSError as exc:
-        msg = f"Failed to read stylesheet {cssPath}: {exc}"
-        raise StoryParseError(msg) from exc
+    text = readUtf8File(cssPath, label="stylesheet")
     return text if text.strip() else None
 
 
@@ -212,11 +338,16 @@ def _loadChapter(
     storyTitle: str,
     renderer: MarkdownRenderer,
     workCssPath: Path,
+    *,
+    preloadedDoc: ParsedDocument | None = None,
 ) -> Chapter:
     """Load and render a single chapter Markdown file."""
     sourceDesc = str(chapterPath)
-    rawText = chapterPath.read_text(encoding="utf-8")
-    parsed = parseMarkdownDocument(rawText, sourceDesc=sourceDesc)
+    parsed = (
+        preloadedDoc
+        if preloadedDoc is not None
+        else parseMarkdownDocument(readUtf8File(chapterPath, label="chapter file"), sourceDesc=sourceDesc)
+    )
     meta = parsed.metadata
 
     filenameMatch = _CHAPTER_FILE_RE.match(chapterPath.name)
@@ -228,7 +359,7 @@ def _loadChapter(
         chapterTitle = ""
 
     published = getBoolField(meta, "published", default=True, sourceDesc=sourceDesc)
-    date, hasExplicitDate = getDateField(meta, chapterPath, "date", "published-date")
+    date, hasExplicitDate = getDateField(meta, chapterPath, *_DATE_KEYS)
 
     summaryHtml = renderer.render(parsed.summaryMd)
     notesHtml = renderer.render(parsed.notesMd)
@@ -240,6 +371,7 @@ def _loadChapter(
     chapterCssPath = chapterPath.with_suffix(".css")
     chapterCssFile = _readOptionalCssFile(chapterCssPath) if chapterCssPath != workCssPath else None
     chapterCssBlocks = tuple(block for block in (chapterCssFile, *parsed.cssBlocks) if block)
+    tax = _extractTaxonomyFields(meta, sourceDesc)
 
     return Chapter(
         number=number,
@@ -255,11 +387,11 @@ def _loadChapter(
         endnotesHtml=endnotesHtml,
         bodyHtml=bodyHtml,
         wordCount=wordCount,
-        extraFandoms=getListField(meta, "fandoms", "fandom", sourceDesc=sourceDesc),
-        extraCategories=getListField(meta, "relationship-categories", "categories", "category", sourceDesc=sourceDesc),
-        extraRelationships=getListField(meta, "relationships", "relationship", "ships", sourceDesc=sourceDesc),
-        extraCharacters=getListField(meta, "characters", "character", sourceDesc=sourceDesc),
-        extraTags=getListField(meta, "tags", "tag", "additional-tags", sourceDesc=sourceDesc),
+        extraFandoms=tax["fandoms"],
+        extraCategories=tax["categories"],
+        extraRelationships=tax["relationships"],
+        extraCharacters=tax["characters"],
+        extraTags=tax["tags"],
         cssBlocks=chapterCssBlocks,
     )
 
@@ -300,118 +432,161 @@ def discoverStoryFiles(storyDir: Path) -> tuple[Path | None, Path | None, list[P
     return (storyKdlPath, indexMdPath, chapterFiles)
 
 
-def loadStory(storyDir: Path, config: SiteConfig, renderer: MarkdownRenderer) -> Story | None:
-    """Load a story directory into a Story model, or return None if unpublished."""
+def _loadSingleDocStory(
+    storyDir: Path,
+    *,
+    storyKdlPath: Path | None,
+    indexMdPath: Path,
+    workCssFile: str | None,
+    config: SiteConfig,
+    renderer: MarkdownRenderer,
+) -> Story | None:
+    """Load a single-document story from index.md (plus optional story.kdl)."""
     slug = storyDir.name
-    storyKdlPath, indexMdPath, chapterFiles = discoverStoryFiles(storyDir)
-    workCssPath = storyDir / "work.css"
-    workCssFile = _readOptionalCssFile(workCssPath)
-
-    isMultiChapter = bool(chapterFiles)
-    if not isMultiChapter:
-        assert indexMdPath is not None
-        sourceDesc = str(indexMdPath)
-        indexDoc = parseMarkdownDocument(indexMdPath.read_text(encoding="utf-8"), sourceDesc=sourceDesc)
-        if storyKdlPath is not None:
-            kdlDoc = parseKdlDocument(storyKdlPath.read_text(encoding="utf-8"), sourceDesc=str(storyKdlPath))
-            meta = mergeDocuments(kdlDoc, indexDoc.metadata)
-        else:
-            meta = indexDoc.metadata
-
-        storyPublished = getBoolField(meta, "published", default=True, sourceDesc=sourceDesc)
-        if not storyPublished and not config.includeDrafts:
-            return None
-
-        title = getStringField(meta, "title", sourceDesc=sourceDesc) or indexDoc.title or _humanizeSlug(slug)
-        author = getStringField(meta, "author", sourceDesc=sourceDesc) or config.author
-        complete = getBoolField(
-            meta,
-            "complete",
-            default=getBoolField(meta, "status", default=True, sourceDesc=sourceDesc),
-            sourceDesc=sourceDesc,
-        )
-        date, hasExplicitDate = getDateField(meta, indexMdPath, "date", "published-date")
-        updated, hasUpdated = getDateField(meta, indexMdPath, "updated", "updated-date")
-        if not hasUpdated:
-            updated = date
-
-        summaryMd = indexDoc.summaryMd or getStringField(meta, "summary", sourceDesc=sourceDesc)
-        notesMd = indexDoc.notesMd or getStringField(meta, "notes", "startnotes", "beginnotes", sourceDesc=sourceDesc)
-        endnotesMd = indexDoc.endnotesMd or getStringField(meta, "endnotes", sourceDesc=sourceDesc)
-
-        summaryHtml = renderer.render(summaryMd)
-        notesHtml = renderer.render(notesMd)
-        endnotesHtml = renderer.render(endnotesMd)
-        bodyHtml = renderer.render(indexDoc.bodyMd)
-        wordCount = countWords(bodyHtml)
-        summaryText = stripHtmlTags(summaryHtml) if summaryHtml else makeExcerpt(bodyHtml)
-        workCssBlocks = tuple(block for block in (workCssFile, *indexDoc.cssBlocks) if block)
-
-        return Story(
-            slug=slug,
-            title=title,
-            author=author,
-            isMultiChapter=False,
-            published=storyPublished,
-            complete=complete,
-            plannedChapters=1,
-            date=date,
-            updated=updated,
-            hasExplicitDate=hasExplicitDate,
-            rating=getStringField(meta, "rating", sourceDesc=sourceDesc),
-            warnings=getListField(meta, "warnings", "archive-warnings", sourceDesc=sourceDesc),
-            fandoms=getListField(meta, "fandoms", "fandom", sourceDesc=sourceDesc),
-            categories=getListField(meta, "relationship-categories", "categories", "category", sourceDesc=sourceDesc),
-            relationships=getListField(meta, "relationships", "relationship", "ships", sourceDesc=sourceDesc),
-            characters=getListField(meta, "characters", "character", sourceDesc=sourceDesc),
-            tags=getListField(meta, "tags", "tag", "additional-tags", sourceDesc=sourceDesc),
-            summaryHtml=summaryHtml,
-            summaryText=summaryText,
-            notesHtml=notesHtml,
-            endnotesHtml=endnotesHtml,
-            bodyHtml=bodyHtml,
-            wordCount=wordCount,
-            chapters=(),
-            sourceDir=storyDir,
-            cssBlocks=workCssBlocks,
-        )
-
-    # Multi-chapter story: prefer whole-work story.kdl, falling back to index.md or first chapter.
-    indexCssBlocks: tuple[str, ...] = ()
+    sourceDesc = str(indexMdPath)
+    indexDoc = parseMarkdownDocument(readUtf8File(indexMdPath, label="story file"), sourceDesc=sourceDesc)
     if storyKdlPath is not None:
-        metaSourcePath = storyKdlPath
-        sourceDesc = str(storyKdlPath)
-        storyMeta = parseKdlDocument(storyKdlPath.read_text(encoding="utf-8"), sourceDesc=sourceDesc)
-        storyTitle = getStringField(storyMeta, "title", sourceDesc=sourceDesc) or _humanizeSlug(slug)
-        storySummaryMd = getStringField(storyMeta, "summary", sourceDesc=sourceDesc)
-        storyNotesMd = getStringField(storyMeta, "notes", "startnotes", "beginnotes", sourceDesc=sourceDesc)
-        storyEndnotesMd = getStringField(storyMeta, "endnotes", sourceDesc=sourceDesc)
-    elif indexMdPath is not None:
-        metaSourcePath = indexMdPath
-        sourceDesc = str(indexMdPath)
-        indexDoc = parseMarkdownDocument(indexMdPath.read_text(encoding="utf-8"), sourceDesc=sourceDesc)
-        storyMeta = indexDoc.metadata
-        storyTitle = indexDoc.title or _humanizeSlug(slug)
-        storySummaryMd = indexDoc.summaryMd or indexDoc.bodyMd
-        storyNotesMd = indexDoc.notesMd
-        storyEndnotesMd = indexDoc.endnotesMd
-        indexCssBlocks = indexDoc.cssBlocks
+        kdlDoc = parseKdlDocument(readUtf8File(storyKdlPath, label="story KDL"), sourceDesc=str(storyKdlPath))
+        meta = mergeDocuments(kdlDoc, indexDoc.metadata)
     else:
-        metaSourcePath = chapterFiles[0]
-        sourceDesc = str(chapterFiles[0])
-        firstDoc = parseMarkdownDocument(chapterFiles[0].read_text(encoding="utf-8"), sourceDesc=sourceDesc)
-        storyMeta = firstDoc.metadata
-        storyTitle = firstDoc.title or _humanizeSlug(slug)
-        storySummaryMd = ""
-        storyNotesMd = ""
-        storyEndnotesMd = ""
+        meta = indexDoc.metadata
+
+    storyPublished = getBoolField(meta, "published", default=True, sourceDesc=sourceDesc)
+    if not storyPublished and not config.includeDrafts:
+        return None
+
+    title = getStringField(meta, "title", sourceDesc=sourceDesc) or indexDoc.title or _humanizeSlug(slug)
+    author = getStringField(meta, "author", sourceDesc=sourceDesc) or config.author
+    complete = getBoolField(meta, "complete", "status", default=True, sourceDesc=sourceDesc)
+
+    date, hasExplicitDate = getDateField(meta, indexMdPath, *_DATE_KEYS)
+    updated, hasUpdated = getDateField(meta, indexMdPath, *_UPDATED_KEYS)
+    if not hasUpdated:
+        updated = date
+
+    # indexDoc already merged inline metadata from index.md; fall back to story.kdl if present.
+    summaryMd = indexDoc.summaryMd or getStringField(meta, "summary", sourceDesc=sourceDesc)
+    notesMd = indexDoc.notesMd or getStringField(meta, *_NOTES_KEYS, sourceDesc=sourceDesc)
+    endnotesMd = indexDoc.endnotesMd or getStringField(meta, "endnotes", sourceDesc=sourceDesc)
+
+    summaryHtml = renderer.render(summaryMd)
+    notesHtml = renderer.render(notesMd)
+    endnotesHtml = renderer.render(endnotesMd)
+    bodyHtml = renderer.render(indexDoc.bodyMd)
+    wordCount = countWords(bodyHtml)
+    summaryText = stripHtmlTags(summaryHtml) if summaryHtml else makeExcerpt(bodyHtml)
+    workCssBlocks = tuple(block for block in (workCssFile, *indexDoc.cssBlocks) if block)
+    tax = _extractTaxonomyFields(meta, sourceDesc)
+
+    return Story(
+        slug=slug,
+        title=title,
+        author=author,
+        isMultiChapter=False,
+        published=storyPublished,
+        complete=complete,
+        plannedChapters=1,
+        date=date,
+        updated=updated,
+        hasExplicitDate=hasExplicitDate,
+        rating=getStringField(meta, "rating", sourceDesc=sourceDesc),
+        warnings=getListField(meta, "warnings", "archive-warnings", sourceDesc=sourceDesc),
+        fandoms=tax["fandoms"],
+        categories=tax["categories"],
+        relationships=tax["relationships"],
+        characters=tax["characters"],
+        tags=tax["tags"],
+        summaryHtml=summaryHtml,
+        summaryText=summaryText,
+        notesHtml=notesHtml,
+        endnotesHtml=endnotesHtml,
+        bodyHtml=bodyHtml,
+        wordCount=wordCount,
+        chapters=(),
+        sourceDir=storyDir,
+        cssBlocks=workCssBlocks,
+    )
+
+
+def _loadMultiChapterHeader(
+    slug: str,
+    storyKdlPath: Path | None,
+    indexMdPath: Path | None,
+    chapterFiles: list[Path],
+) -> _StoryHeader:
+    """Resolve whole-work metadata from story.kdl, falling back to index.md or the first chapter."""
+    if storyKdlPath is not None:
+        sourceDesc = str(storyKdlPath)
+        storyMeta = parseKdlDocument(readUtf8File(storyKdlPath, label="story KDL"), sourceDesc=sourceDesc)
+        return _StoryHeader(
+            metaSourcePath=storyKdlPath,
+            sourceDesc=sourceDesc,
+            metadata=storyMeta,
+            title=getStringField(storyMeta, "title", sourceDesc=sourceDesc) or _humanizeSlug(slug),
+            summaryMd=getStringField(storyMeta, "summary", sourceDesc=sourceDesc),
+            notesMd=getStringField(storyMeta, *_NOTES_KEYS, sourceDesc=sourceDesc),
+            endnotesMd=getStringField(storyMeta, "endnotes", sourceDesc=sourceDesc),
+        )
+
+    if indexMdPath is not None:
+        sourceDesc = str(indexMdPath)
+        indexDoc = parseMarkdownDocument(readUtf8File(indexMdPath, label="story index"), sourceDesc=sourceDesc)
+        return _StoryHeader(
+            metaSourcePath=indexMdPath,
+            sourceDesc=sourceDesc,
+            metadata=indexDoc.metadata,
+            title=indexDoc.title or _humanizeSlug(slug),
+            summaryMd=indexDoc.summaryMd or indexDoc.bodyMd,
+            notesMd=indexDoc.notesMd,
+            endnotesMd=indexDoc.endnotesMd,
+            indexCssBlocks=indexDoc.cssBlocks,
+        )
+
+    firstChapterPath = chapterFiles[0]
+    sourceDesc = str(firstChapterPath)
+    firstDoc = parseMarkdownDocument(readUtf8File(firstChapterPath, label="chapter file"), sourceDesc=sourceDesc)
+    return _StoryHeader(
+        metaSourcePath=firstChapterPath,
+        sourceDesc=sourceDesc,
+        metadata=firstDoc.metadata,
+        title=firstDoc.title or _humanizeSlug(slug),
+        summaryMd="",
+        notesMd="",
+        endnotesMd="",
+        preloadedFirstChapter=firstDoc,
+    )
+
+
+def _loadMultiChapterStory(
+    storyDir: Path,
+    *,
+    storyKdlPath: Path | None,
+    indexMdPath: Path | None,
+    chapterFiles: list[Path],
+    workCssPath: Path,
+    workCssFile: str | None,
+    config: SiteConfig,
+    renderer: MarkdownRenderer,
+) -> Story | None:
+    """Load a multi-chapter story and its included chapters."""
+    slug = storyDir.name
+    header = _loadMultiChapterHeader(slug, storyKdlPath, indexMdPath, chapterFiles)
+    storyMeta = header.metadata
+    sourceDesc = header.sourceDesc
 
     storyPublished = getBoolField(storyMeta, "published", default=True, sourceDesc=sourceDesc)
     if not storyPublished and not config.includeDrafts:
         return None
 
     loadedChapters = [
-        _loadChapter(chapterPath, idx + 1, storyTitle, renderer, workCssPath)
+        _loadChapter(
+            chapterPath,
+            idx + 1,
+            header.title,
+            renderer,
+            workCssPath,
+            preloadedDoc=header.preloadedFirstChapter if idx == 0 else None,
+        )
         for idx, chapterPath in enumerate(chapterFiles)
     ]
     loadedChapters.sort(key=lambda chapter: (chapter.number, chapter.sourcePath.name))
@@ -428,56 +603,37 @@ def loadStory(storyDir: Path, config: SiteConfig, renderer: MarkdownRenderer) ->
         return None
 
     author = getStringField(storyMeta, "author", sourceDesc=sourceDesc) or config.author
-    complete = getBoolField(
-        storyMeta,
-        "complete",
-        default=getBoolField(storyMeta, "status", default=False, sourceDesc=sourceDesc),
-        sourceDesc=sourceDesc,
-    )
+    complete = getBoolField(storyMeta, "complete", "status", default=False, sourceDesc=sourceDesc)
     plannedChapters = getIntField(storyMeta, "planned-chapters", "total-chapters", sourceDesc=sourceDesc)
 
-    fandoms = _mergeLists(
-        getListField(storyMeta, "fandoms", "fandom", sourceDesc=sourceDesc),
-        *(chapter.extraFandoms for chapter in includedChapters),
-    )
-    categories = _mergeLists(
-        getListField(storyMeta, "relationship-categories", "categories", "category", sourceDesc=sourceDesc),
-        *(chapter.extraCategories for chapter in includedChapters),
-    )
-    relationships = _mergeLists(
-        getListField(storyMeta, "relationships", "relationship", "ships", sourceDesc=sourceDesc),
-        *(chapter.extraRelationships for chapter in includedChapters),
-    )
-    characters = _mergeLists(
-        getListField(storyMeta, "characters", "character", sourceDesc=sourceDesc),
-        *(chapter.extraCharacters for chapter in includedChapters),
-    )
-    tags = _mergeLists(
-        getListField(storyMeta, "tags", "tag", "additional-tags", sourceDesc=sourceDesc),
-        *(chapter.extraTags for chapter in includedChapters),
-    )
+    workTax = _extractTaxonomyFields(storyMeta, sourceDesc)
+    fandoms = _mergeLists(workTax["fandoms"], *(ch.extraFandoms for ch in includedChapters))
+    categories = _mergeLists(workTax["categories"], *(ch.extraCategories for ch in includedChapters))
+    relationships = _mergeLists(workTax["relationships"], *(ch.extraRelationships for ch in includedChapters))
+    characters = _mergeLists(workTax["characters"], *(ch.extraCharacters for ch in includedChapters))
+    tags = _mergeLists(workTax["tags"], *(ch.extraTags for ch in includedChapters))
 
-    storyDate, hasStoryDate = getDateField(storyMeta, metaSourcePath, "date", "published-date")
+    storyDate, hasStoryDate = getDateField(storyMeta, header.metaSourcePath, *_DATE_KEYS)
     explicitChapterDates = [chapter.date for chapter in includedChapters if chapter.hasExplicitDate]
     if not hasStoryDate and explicitChapterDates:
         storyDate = min(explicitChapterDates)
         hasStoryDate = True
 
-    updated, hasUpdated = getDateField(storyMeta, metaSourcePath, "updated", "updated-date")
+    updated, hasUpdated = getDateField(storyMeta, header.metaSourcePath, *_UPDATED_KEYS)
     if not hasUpdated:
         chapterDates = explicitChapterDates if explicitChapterDates else [chapter.date for chapter in includedChapters]
         updated = max([storyDate, *chapterDates])
 
-    summaryHtml = renderer.render(storySummaryMd)
-    notesHtml = renderer.render(storyNotesMd)
-    endnotesHtml = renderer.render(storyEndnotesMd)
+    summaryHtml = renderer.render(header.summaryMd)
+    notesHtml = renderer.render(header.notesMd)
+    endnotesHtml = renderer.render(header.endnotesMd)
     summaryText = stripHtmlTags(summaryHtml) if summaryHtml else includedChapters[0].summaryText
     totalWords = sum(chapter.wordCount for chapter in includedChapters)
-    workCssBlocks = tuple(block for block in (workCssFile, *indexCssBlocks) if block)
+    workCssBlocks = tuple(block for block in (workCssFile, *header.indexCssBlocks) if block)
 
     return Story(
         slug=slug,
-        title=storyTitle,
+        title=header.title,
         author=author,
         isMultiChapter=True,
         published=storyPublished,
@@ -505,6 +661,35 @@ def loadStory(storyDir: Path, config: SiteConfig, renderer: MarkdownRenderer) ->
     )
 
 
+def loadStory(storyDir: Path, config: SiteConfig, renderer: MarkdownRenderer) -> Story | None:
+    """Load a story directory into a Story model, or return None if unpublished."""
+    storyKdlPath, indexMdPath, chapterFiles = discoverStoryFiles(storyDir)
+    workCssPath = storyDir / "work.css"
+    workCssFile = _readOptionalCssFile(workCssPath)
+
+    if not chapterFiles:
+        assert indexMdPath is not None
+        return _loadSingleDocStory(
+            storyDir,
+            storyKdlPath=storyKdlPath,
+            indexMdPath=indexMdPath,
+            workCssFile=workCssFile,
+            config=config,
+            renderer=renderer,
+        )
+
+    return _loadMultiChapterStory(
+        storyDir,
+        storyKdlPath=storyKdlPath,
+        indexMdPath=indexMdPath,
+        chapterFiles=chapterFiles,
+        workCssPath=workCssPath,
+        workCssFile=workCssFile,
+        config=config,
+        renderer=renderer,
+    )
+
+
 def _storySortKey(story: Story) -> tuple[int, int, str]:
     """Sort stories by explicit date first, then updated date descending, then title."""
     dateOrdinal = story.updated.date().toordinal()
@@ -521,13 +706,20 @@ def _buildTaxonomies(
     for kind, label, singularLabel in TAXONOMY_SPECS:
         grouped: dict[str, list[Story]] = {}
         canonicalNames: dict[str, str] = {}
+        observedByCanonical: dict[str, set[str]] = {}
         for story in stories:
             for name in story.taxonomyNames(kind):
                 key = name.lower()
                 canonical = canonicalNames.setdefault(key, name)
                 grouped.setdefault(canonical, []).append(story)
+                observedByCanonical.setdefault(canonical, set()).add(name)
 
         slugMap = buildSlugMap(grouped.keys())
+        # Map alternate casings from individual stories onto their canonical bucket slug.
+        for canonical, spellings in observedByCanonical.items():
+            canonicalSlug = slugMap[canonical]
+            for spelling in spellings:
+                slugMap.setdefault(spelling, canonicalSlug)
         slugMaps[kind] = slugMap
         buckets = tuple(
             TaxonomyBucket(

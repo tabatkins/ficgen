@@ -10,7 +10,7 @@ from pathlib import Path
 import ao3fetch
 import pytest
 
-from ficgen.cli import main
+from ficgen.cli import main, mergeCookieHeader
 from ficgen.generator import generateSite
 from ficgen.importer import htmlToMarkdown
 from ficgen.markdownExt import MarkdownRenderer
@@ -301,3 +301,49 @@ def test_import_respects_site_kdl_stories_dir(
     assert main(["import", str(epubPath)]) == 0
     assert (tmp_path / "custom-fics" / "epub-story" / "index.md").is_file()
     assert not (tmp_path / "_stories").exists()
+
+
+def test_import_handles_missing_and_corrupt_epub_and_cookie_header_join(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Missing or corrupt EPUBs fail cleanly and --cookie joins existing Cookie headers with '; '."""
+    storiesDir = tmp_path / "_stories"
+
+    assert main(["import", str(tmp_path / "missing.epub"), "--stories", str(storiesDir)]) == 1
+    assert "does not exist" in capsys.readouterr().err
+
+    badEpub = tmp_path / "corrupt.epub"
+    badEpub.write_bytes(b"not a zip file")
+    assert main(["import", str(badEpub), "--stories", str(storiesDir)]) == 1
+    assert "Failed to parse EPUB" in capsys.readouterr().err
+
+    seenCookies: list[str] = []
+
+    def _recordingFetch(url: str, headers: Mapping[str, str] | None = None) -> ao3fetch.FetchResponse:
+        seenCookies.append((headers or {}).get("Cookie", ""))
+        return ao3fetch.FetchResponse(status=200, headers={}, body=_WORK_SINGLE_HTML.encode("utf-8"), url=url)
+
+    ao3fetch.setFetcher(_recordingFetch)
+    try:
+        assert (
+            main(
+                [
+                    "import",
+                    "https://superlove.sayitditto.net/works/1269",
+                    "--stories",
+                    str(storiesDir),
+                    "--cookie",
+                    "session=abc123",
+                ],
+            )
+            == 0
+        )
+    finally:
+        ao3fetch.resetFetcher()
+        ao3fetch.resetArchiveBaseUrl()
+    assert seenCookies == ["view_adult=true; session=abc123"]
+
+    assert mergeCookieHeader("view_adult=true", "session=abc123") == "view_adult=true; session=abc123"
+    assert mergeCookieHeader("view_adult=true;", "session=abc123") == "view_adult=true; session=abc123"
+    assert mergeCookieHeader("", "session=abc123") == "session=abc123"

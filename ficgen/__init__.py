@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .cli import buildArchive as buildArchive, main as main
+from .css import FONT_PRESETS as FONT_PRESETS, resolveFontStack as resolveFontStack
 from .generator import BuildResult as BuildResult, generateSite as generateSite
 from .importer import (
     ImportOptions as ImportOptions,
@@ -17,7 +18,6 @@ from .kdlMeta import (
 )
 from .markdownExt import MarkdownRenderer as MarkdownRenderer
 from .models import (
-    FONT_PRESETS as FONT_PRESETS,
     Archive as Archive,
     Chapter as Chapter,
     FeedEntry as FeedEntry,
@@ -25,7 +25,6 @@ from .models import (
     Story as Story,
     TaxonomyBucket as TaxonomyBucket,
     TaxonomyItem as TaxonomyItem,
-    resolveFontStack as resolveFontStack,
     slugify as slugify,
 )
 from .parser import (

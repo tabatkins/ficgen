@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Final, Literal, NamedTuple, Protocol, cast, override
 
 __all__ = [
@@ -15,6 +15,7 @@ __all__ = [
     "Final",
     "FontRole",
     "Iterable",
+    "Iterator",
     "Literal",
     "Mapping",
     "MetadataList",

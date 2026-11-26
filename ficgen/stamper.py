@@ -10,16 +10,24 @@ from pathlib import Path
 import kdl
 
 from . import t
-from .kdlMeta import StoryParseError, findNodes, getBoolField, parseKdlDocument
-from .parser import discoverStoryDirs, discoverStoryFiles, parseMarkdownDocument
+from .kdlMeta import (
+    StoryParseError,
+    findNodes,
+    formatKdlString,
+    getBoolField,
+    isKdlNull,
+    mergeDocuments,
+    parseIsoDateTime,
+    parseKdlDocument,
+    readUtf8File,
+)
+from .parser import (
+    discoverStoryDirs,
+    discoverStoryFiles,
+    findMetadataFences,
+    normalizeLineEndings,
+)
 
-_TITLE_LINE_RE: t.Final[re.Pattern[str]] = re.compile(r"^#\s+.+$")
-_METADATA_BLOCK_RE: t.Final[re.Pattern[str]] = re.compile(
-    r"(?ms)^(?P<open>```metadata(?:[ \t]+kdl)?[ \t]*\n)(?P<body>.*?)(?P<close>^```[ \t]*)(?P<tail>\n?)",
-)
-_LEADING_KDL_BLOCK_RE: t.Final[re.Pattern[str]] = re.compile(
-    r"(?ms)\A(?:(?:#[^\n]*\n)?[ \t\n]*)(?P<open>```kdl[ \t]*\n)(?P<body>.*?)(?P<close>^```[ \t]*)(?P<tail>\n?)",
-)
 _KDL_DATE_LINE_RE: t.Final[re.Pattern[str]] = re.compile(
     r"(?im)^(?P<indent>[ \t]*)(?P<key>date|published[-_]date)(?:[ \t]+.*)?$",
 )
@@ -63,12 +71,7 @@ def validateDateString(rawDate: str) -> str:
     if not cleaned:
         msg = "Date value cannot be empty."
         raise StoryParseError(msg)
-    normalized = cleaned.replace("Z", "+00:00")
-    try:
-        datetime.fromisoformat(normalized)
-    except ValueError as exc:
-        msg = f"Invalid ISO-8601 date {cleaned!r} (expected e.g. YYYY-MM-DD)."
-        raise StoryParseError(msg) from exc
+    parseIsoDateTime(cleaned, f"Invalid ISO-8601 date {cleaned!r} (expected e.g. YYYY-MM-DD).")
     return cleaned
 
 
@@ -93,18 +96,12 @@ def _hasActiveDateValue(doc: kdl.Document) -> tuple[bool, bool]:
         if not node.args:
             continue
         val = node.args[0]
-        if val is None or isinstance(val, kdl.Null):
+        if isKdlNull(val):
             continue
         if isinstance(val, str) and not val.strip():
             continue
         return (True, True)
     return (True, False)
-
-
-def _isMarkdownUnpublished(rawText: str, sourceDesc: str = "<markdown>") -> bool:
-    """Return True if a Markdown document explicitly declares published false."""
-    parsed = parseMarkdownDocument(rawText, sourceDesc=sourceDesc)
-    return not getBoolField(parsed.metadata, "published", default=True, sourceDesc=sourceDesc)
 
 
 def _isKdlUnpublished(rawText: str, sourceDesc: str = "<kdl>") -> bool:
@@ -113,29 +110,47 @@ def _isKdlUnpublished(rawText: str, sourceDesc: str = "<kdl>") -> bool:
     return not getBoolField(doc, "published", default=True, sourceDesc=sourceDesc)
 
 
-def _updateKdlBlockDate(body: str, dateValue: str, *, force: bool, sourceDesc: str) -> tuple[str, bool]:
+def _isMarkdownUnpublished(normalized: str, sourceDesc: str = "<markdown>") -> bool:
+    """Return True if a normalized Markdown document explicitly declares published false."""
+    _, metaBlocks = findMetadataFences(normalized)
+    merged = mergeDocuments(*(parseKdlDocument(block.body, sourceDesc) for block in metaBlocks))
+    return not getBoolField(merged, "published", default=True, sourceDesc=sourceDesc)
+
+
+def _updateKdlBlockDate(
+    body: str,
+    doc: kdl.Document,
+    dateValue: str,
+    *,
+    force: bool,
+) -> tuple[str, bool]:
     """Insert or update a KDL `date "..."` node inside a metadata fence body."""
-    doc = parseKdlDocument(body, sourceDesc=sourceDesc)
     hasNode, hasValue = _hasActiveDateValue(doc)
     if hasValue and not force:
         return (body, False)
 
+    dateLit = formatKdlString(dateValue)
     if hasNode:
-        # Prefer in-place single-line replacement to keep comments and formatting intact.
-        lineMatch = _KDL_DATE_LINE_RE.search(body)
-        if lineMatch is not None:
-            replacement = f'{lineMatch.group("indent")}{lineMatch.group("key")} "{dateValue}"'
+        dateNodes = findNodes(doc, "date", "published-date")
+        lineMatches = list(_KDL_DATE_LINE_RE.finditer(body))
+        # Prefer in-place single-line replacement when unambiguous, to keep comments and formatting intact.
+        if len(dateNodes) == 1 and len(lineMatches) == 1:
+            lineMatch = lineMatches[0]
+            replacement = f'{lineMatch.group("indent")}{lineMatch.group("key")} {dateLit}'
             newBody = body[: lineMatch.start()] + replacement + body[lineMatch.end() :]
             return (newBody, newBody != body)
 
-        # Fallback: update KDL AST directly and reprint.
-        for node in findNodes(doc, "date", "published-date"):
+        # Fallback (multiple date nodes, semicolons, or block comments): update KDL AST and reprint.
+        for node in dateNodes:
             node.args = [dateValue]
-        return (doc.print(), True)
+        reprinted = doc.print()
+        if reprinted and not reprinted.endswith("\n"):
+            reprinted += "\n"
+        return (reprinted, reprinted != body)
 
     if body and not body.endswith("\n"):
-        return (body + f'\ndate "{dateValue}"\n', True)
-    return (body + f'date "{dateValue}"\n', True)
+        return (body + f"\ndate {dateLit}\n", True)
+    return (body + f"date {dateLit}\n", True)
 
 
 def stampDocumentText(
@@ -150,36 +165,39 @@ def stampDocumentText(
     Returns `(updatedText, changed)`. Preserves original line endings and prose untouched.
     """
     lineEnding = _detectLineEnding(rawText)
-    normalized = rawText.replace("\r\n", "\n")
+    normalized = normalizeLineEndings(rawText)
+    leading, metaBlocks = findMetadataFences(normalized)
 
-    blockMatch = _METADATA_BLOCK_RE.search(normalized) or _LEADING_KDL_BLOCK_RE.match(normalized)
-    if blockMatch is not None:
-        newBody, changed = _updateKdlBlockDate(
-            blockMatch.group("body"),
-            dateValue,
-            force=force,
-            sourceDesc=sourceDesc,
-        )
+    if metaBlocks:
+        parsedBlocks = [(block, parseKdlDocument(block.body, sourceDesc)) for block in metaBlocks]
+        merged = mergeDocuments(*(doc for _, doc in parsedBlocks))
+        _, hasAnyDateValue = _hasActiveDateValue(merged)
+        if hasAnyDateValue and not force:
+            return (rawText, False)
+
+        # Pick the last fence containing a date node (matching parser's last-wins semantics),
+        # or the first metadata fence if none currently declares a date node.
+        targetBlock, targetDoc = parsedBlocks[0]
+        for block, doc in reversed(parsedBlocks):
+            hasNode, _ = _hasActiveDateValue(doc)
+            if hasNode:
+                targetBlock, targetDoc = block, doc
+                break
+
+        newBody, changed = _updateKdlBlockDate(targetBlock.body, targetDoc, dateValue, force=force)
         if not changed:
             return (rawText, False)
-        updatedNormalized = normalized[: blockMatch.start("body")] + newBody + normalized[blockMatch.end("body") :]
+        updatedNormalized = normalized[: targetBlock.bodyStart] + newBody + normalized[targetBlock.bodyEnd :]
         updated = updatedNormalized.replace("\n", lineEnding)
         return (updated, updated != rawText)
 
     # No metadata fence exists yet: insert one after a leading '# Title', or at the top.
-    metaBlock = f'```metadata\ndate "{dateValue}"\n```'
-    lines = normalized.split("\n")
-    firstNonEmpty = 0
-    while firstNonEmpty < len(lines) and not lines[firstNonEmpty].strip():
-        firstNonEmpty += 1
-
-    if firstNonEmpty < len(lines) and _TITLE_LINE_RE.match(lines[firstNonEmpty]) is not None:
-        prefix = "\n".join(lines[: firstNonEmpty + 1])
-        rest = "\n".join(lines[firstNonEmpty + 1 :]).lstrip("\n")
-        if rest:
-            updatedNormalized = f"{prefix}\n\n{metaBlock}\n\n{rest}"
-        else:
-            updatedNormalized = f"{prefix}\n\n{metaBlock}\n"
+    dateLit = formatKdlString(dateValue)
+    metaBlock = f"```metadata\ndate {dateLit}\n```"
+    if leading.title:
+        prefix = normalized[: leading.contentStart].rstrip("\n")
+        rest = normalized[leading.contentStart :].lstrip("\n")
+        updatedNormalized = f"{prefix}\n\n{metaBlock}\n\n{rest}" if rest else f"{prefix}\n\n{metaBlock}\n"
     else:
         rest = normalized.lstrip("\n")
         updatedNormalized = f"{metaBlock}\n\n{rest}" if rest else f"{metaBlock}\n"
@@ -194,10 +212,13 @@ def _collectStoryFiles(storyDir: Path) -> list[tuple[Path, bool]]:
 
     storyPublished = True
     if storyKdlPath is not None:
-        storyPublished = not _isKdlUnpublished(storyKdlPath.read_text(encoding="utf-8"), sourceDesc=str(storyKdlPath))
+        storyPublished = not _isKdlUnpublished(
+            readUtf8File(storyKdlPath, label="story KDL"),
+            sourceDesc=str(storyKdlPath),
+        )
     elif indexMdPath is not None:
         storyPublished = not _isMarkdownUnpublished(
-            indexMdPath.read_text(encoding="utf-8"),
+            normalizeLineEndings(readUtf8File(indexMdPath, label="story file")),
             sourceDesc=str(indexMdPath),
         )
 
@@ -259,8 +280,11 @@ def stampFile(
 ) -> StampEntry:
     """Stamp `date "..."` into a single Markdown file if eligible."""
     sourceDesc = str(path)
-    rawText = path.read_text(encoding="utf-8")
-    filePublished = storyPublished and not _isMarkdownUnpublished(rawText, sourceDesc=sourceDesc)
+    rawText = readUtf8File(path, label="story file")
+    filePublished = storyPublished and not _isMarkdownUnpublished(
+        normalizeLineEndings(rawText),
+        sourceDesc=sourceDesc,
+    )
     if not filePublished and not includeDrafts:
         return StampEntry(path=path, action="skipped_draft", dateValue=dateValue)
 

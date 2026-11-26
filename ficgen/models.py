@@ -4,48 +4,44 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 from . import t
-from .kdlMeta import StoryParseError, normalizeKey
+from .css import (
+    DEFAULT_CUSTOM_CSS_NAME as DEFAULT_CUSTOM_CSS_NAME,
+    DEFAULT_MONO_FONT as DEFAULT_MONO_FONT,
+    DEFAULT_SANS_FONT as DEFAULT_SANS_FONT,
+    DEFAULT_SERIF_FONT as DEFAULT_SERIF_FONT,
+    FONT_PRESETS as FONT_PRESETS,
+    formatFontArgs as formatFontArgs,
+    resolveFontStack as resolveFontStack,
+)
 
 DEFAULT_STORIES_DIR_NAME: t.Final[str] = "_stories"
-DEFAULT_CUSTOM_CSS_NAME: t.Final[str] = "site.css"
-DEFAULT_SERIF_FONT: t.Final[str] = "old-style"
-DEFAULT_SANS_FONT: t.Final[str] = "neogrotesque"
-DEFAULT_MONO_FONT: t.Final[str] = "mono-code"
 
-FONT_PRESETS: t.Final[tuple[str, ...]] = (
-    "system-ui",
-    "transitional",
-    "old-style",
-    "humanist",
-    "geometric-humanist",
-    "classical-humanist",
-    "neogrotesque",
-    "mono-slab-serif",
-    "mono-code",
-    "industrial",
-    "rounded-sans",
-    "slab-serif",
-    "antique",
-    "didone",
-    "handwritten",
-)
-_FONT_PRESET_SET: t.Final[frozenset[str]] = frozenset(FONT_PRESETS)
-_FONT_ROLE_DEFAULTS: t.Final[dict[t.FontRole, tuple[str, str]]] = {
-    "serif": (DEFAULT_SERIF_FONT, "serif"),
-    "sans": (DEFAULT_SANS_FONT, "sans-serif"),
-    "mono": (DEFAULT_MONO_FONT, "monospace"),
-}
-_GENERIC_FALLBACK_FONTS: t.Final[frozenset[str]] = frozenset(
-    {"serif", "sans-serif", "monospace", "cursive", "fantasy"},
-)
-_PRESET_VAR_RE: t.Final[re.Pattern[str]] = re.compile(r"^var\(\s*--font-([a-z0-9-]+)\s*\)$", re.IGNORECASE)
-_SIMPLE_CSS_IDENT_RE: t.Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9_-]+$")
-_INVALID_CSS_FONT_RE: t.Final[re.Pattern[str]] = re.compile(r"[\r\n;{}]")
+__all__ = [
+    "DEFAULT_CUSTOM_CSS_NAME",
+    "DEFAULT_MONO_FONT",
+    "DEFAULT_SANS_FONT",
+    "DEFAULT_SERIF_FONT",
+    "DEFAULT_STORIES_DIR_NAME",
+    "FONT_PRESETS",
+    "TAXONOMY_SPECS",
+    "Archive",
+    "Chapter",
+    "FeedEntry",
+    "SiteConfig",
+    "Story",
+    "TaxonomyBucket",
+    "TaxonomyItem",
+    "buildSlugMap",
+    "formatFontArgs",
+    "resolveFontStack",
+    "slugify",
+]
 
 TAXONOMY_SPECS: t.Final[tuple[tuple[t.TaxonomyKind, str, str], ...]] = (
     ("fandoms", "Fandoms", "Fandom"),
@@ -56,129 +52,6 @@ TAXONOMY_SPECS: t.Final[tuple[tuple[t.TaxonomyKind, str, str], ...]] = (
 )
 
 _SLUG_UNSAFE_RE: t.Final[re.Pattern[str]] = re.compile(r"[^a-z0-9]+")
-
-
-def _matchFontPreset(value: str) -> str | None:
-    """Return the canonical preset name if value refers to a built-in font preset."""
-    normalized = normalizeKey(value)
-    if normalized.startswith("--font-"):
-        normalized = normalized.removeprefix("--font-")
-    if normalized in _FONT_PRESET_SET:
-        return normalized
-    return None
-
-
-def _formatFontStackItem(item: str) -> str:
-    """Format one item from a multi-argument font list into a CSS font-family entry."""
-    preset = _matchFontPreset(item)
-    if preset is not None:
-        return f"var(--font-{preset})"
-    if (
-        (len(item) >= 2 and item[0] == item[-1] and item[0] in {"'", '"'})
-        or "," in item
-        or "(" in item
-        or _SIMPLE_CSS_IDENT_RE.match(item) is not None
-    ):
-        return item
-    if "'" not in item:
-        return f"'{item}'"
-    if '"' not in item:
-        return f'"{item}"'
-    escaped = item.replace("\\", "\\\\").replace("'", "\\'")
-    return f"'{escaped}'"
-
-
-def formatFontArgs(args: t.Sequence[str]) -> str:
-    """Join one or more KDL font arguments into a single preset name or CSS font stack."""
-    cleaned = [item.strip() for item in args if item.strip()]
-    if not cleaned:
-        return ""
-    if len(cleaned) == 1:
-        return cleaned[0]
-    return ", ".join(_formatFontStackItem(item) for item in cleaned)
-
-
-def _splitCssFontList(stack: str, originalValue: str) -> list[str]:
-    """Split a CSS font-family list on top-level commas, respecting quotes and parentheses."""
-    parts: list[str] = []
-    current: list[str] = []
-    quote: str | None = None
-    parenDepth = 0
-    escaped = False
-
-    for ch in stack:
-        if escaped:
-            current.append(ch)
-            escaped = False
-            continue
-        if quote is not None:
-            current.append(ch)
-            if ch == "\\":
-                escaped = True
-            elif ch == quote:
-                quote = None
-            continue
-        if ch in {"'", '"'}:
-            quote = ch
-            current.append(ch)
-        elif ch == "(":
-            parenDepth += 1
-            current.append(ch)
-        elif ch == ")" and parenDepth > 0:
-            parenDepth -= 1
-            current.append(ch)
-        elif ch == "," and parenDepth == 0:
-            parts.append("".join(current).strip())
-            current.clear()
-        else:
-            current.append(ch)
-
-    if quote is not None:
-        msg = f"Invalid CSS font stack {originalValue!r}: unterminated quote."
-        raise StoryParseError(msg)
-
-    parts.append("".join(current).strip())
-    return parts
-
-
-def _isUnfailingFontEntry(entry: str) -> bool:
-    """Return True if a CSS font-family entry is a generic fallback or built-in preset that cannot fail."""
-    if entry.lower() in _GENERIC_FALLBACK_FONTS:
-        return True
-    presetMatch = _PRESET_VAR_RE.match(entry)
-    return presetMatch is not None and presetMatch.group(1).lower() in _FONT_PRESET_SET
-
-
-def resolveFontStack(value: str, *, role: t.FontRole) -> str:
-    """Resolve a font preset name or custom CSS font stack into a CSS custom property value."""
-    defaultPreset, fallbackGeneric = _FONT_ROLE_DEFAULTS[role]
-    cleaned = value.strip().rstrip(";").strip()
-    if not cleaned:
-        cleaned = defaultPreset
-    if _INVALID_CSS_FONT_RE.search(cleaned) is not None:
-        msg = f"Invalid CSS font stack {value!r}: must not contain newlines, ';', '{{', or '}}'."
-        raise StoryParseError(msg)
-    preset = _matchFontPreset(cleaned)
-    if preset is not None:
-        return f"var(--font-{preset})"
-
-    parts = _splitCssFontList(cleaned, value)
-    if any(not part for part in parts):
-        msg = f"Invalid CSS font stack {value!r}: contains an empty font family entry."
-        raise StoryParseError(msg)
-
-    for idx, part in enumerate(parts):
-        if _isUnfailingFontEntry(part) and idx < len(parts) - 1:
-            msg = (
-                f"Invalid CSS font stack for {role} ({value!r}): "
-                + f"generic fallback {part!r} must be at the end of the font list "
-                + "because fonts listed after it can never be selected."
-            )
-            raise StoryParseError(msg)
-
-    if _isUnfailingFontEntry(parts[-1]):
-        return cleaned
-    return f"{cleaned}, {fallbackGeneric}"
 
 
 def slugify(text: str) -> str:
@@ -194,12 +67,8 @@ def slugify(text: str) -> str:
 def buildSlugMap(names: t.Iterable[str]) -> dict[str, str]:
     """Assign collision-free URL slugs for a collection of display names."""
     uniqueNames = sorted(set(names), key=lambda value: (value.lower(), value))
-    counts: dict[str, int] = {}
-    baseSlugs: dict[str, str] = {}
-    for name in uniqueNames:
-        base = slugify(name)
-        baseSlugs[name] = base
-        counts[base] = counts.get(base, 0) + 1
+    baseSlugs = {name: slugify(name) for name in uniqueNames}
+    counts = Counter(baseSlugs.values())
 
     usedSlugs: set[str] = set()
     slugMap: dict[str, str] = {}
@@ -330,7 +199,7 @@ class Story:
             return "1/1"
         count = len(self.chapters)
         if self.complete:
-            total = self.plannedChapters if self.plannedChapters and self.plannedChapters >= count else count
+            total = max(count, self.plannedChapters or 0)
             return f"{count}/{total}"
         if self.plannedChapters is not None:
             return f"{count}/{self.plannedChapters}"
