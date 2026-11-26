@@ -13,6 +13,7 @@ from pathlib import Path
 from jinja2 import Environment, PackageLoader, select_autoescape
 
 from . import t
+from .kdlMeta import StoryParseError
 from .models import (
     TAXONOMY_SPECS,
     Archive,
@@ -98,11 +99,117 @@ def _applyFontConfig(cssText: str, config: SiteConfig) -> str:
     return _replaceCssVar(updated, _FONT_MONO_RE, resolveFontStack(config.fontMono, role="mono"))
 
 
+def _skipCssQuoted(cssText: str, start: int) -> int:
+    """Return index immediately after the closing quote of a CSS string starting at start."""
+    quote = cssText[start]
+    pos = start + 1
+    length = len(cssText)
+    while pos < length:
+        ch = cssText[pos]
+        if ch == "\\":
+            pos += 2
+            continue
+        pos += 1
+        if ch == quote:
+            return pos
+    return length
+
+
+def _scanCssRuleEnd(cssText: str, start: int) -> int:
+    """Find the index immediately past the terminating ';' of an @-rule, respecting quotes and parens."""
+    pos = start
+    length = len(cssText)
+    parenDepth = 0
+    while pos < length:
+        ch = cssText[pos]
+        if ch in {"'", '"'}:
+            pos = _skipCssQuoted(cssText, pos)
+            continue
+        pos += 1
+        if ch == "(":
+            parenDepth += 1
+        elif ch == ")" and parenDepth > 0:
+            parenDepth -= 1
+        elif ch == ";" and parenDepth == 0:
+            return pos
+    return length
+
+
+def _extractLeadingImports(cssText: str) -> tuple[list[str], str]:
+    """Hoist any leading @import rules from custom CSS so they remain valid before @layer ficgen."""
+    imports: list[str] = []
+    pos = 0
+    length = len(cssText)
+
+    while pos < length:
+        if cssText[pos].isspace():
+            pos += 1
+            continue
+        if cssText.startswith("/*", pos):
+            endComment = cssText.find("*/", pos + 2)
+            if endComment == -1:
+                break
+            pos = endComment + 2
+            continue
+        lowered = cssText[pos : pos + 9].lower()
+        if lowered.startswith("@charset"):
+            pos = _scanCssRuleEnd(cssText, pos)
+            continue
+        if lowered.startswith("@import") and (pos + 7 == length or not cssText[pos + 7].isalnum()):
+            ruleEnd = _scanCssRuleEnd(cssText, pos)
+            imports.append(cssText[pos:ruleEnd].strip())
+            pos = ruleEnd
+            continue
+        break
+
+    remaining = cssText[pos:].lstrip("\r\n") if imports else cssText
+    return (imports, remaining)
+
+
 def _copyStylesheet(outputDir: Path, config: SiteConfig, written: list[Path]) -> None:
-    """Write the packaged CSS stylesheet with configured fonts into the archive output directory."""
+    """Write the archive's style.css, applying font settings and any custom site stylesheet."""
+    outCssPath = outputDir / "style.css"
+    customCssPath = config.customCssPath
+
+    if customCssPath is not None:
+        if not customCssPath.is_file():
+            msg = f"Custom CSS file does not exist: {customCssPath}"
+            raise StoryParseError(msg)
+        if customCssPath.resolve() == outCssPath.resolve():
+            msg = (
+                f"Custom CSS path cannot be the same as the generated output stylesheet: {outCssPath} "
+                + "(use a separate source file such as site.css)."
+            )
+            raise StoryParseError(msg)
+        try:
+            customCss = customCssPath.read_text(encoding="utf-8")
+        except OSError as exc:
+            msg = f"Failed to read custom CSS file {customCssPath}: {exc}"
+            raise StoryParseError(msg) from exc
+
+        if config.customCssMode == "replace":
+            _writeTextFile(outCssPath, customCss, written)
+            return
+
+        packagedCss = resources.files("ficgen").joinpath("static/style.css").read_text(encoding="utf-8")
+        baseCss = _applyFontConfig(packagedCss, config).rstrip() + "\n"
+        imports, bodyCss = _extractLeadingImports(customCss)
+        chunks: list[str] = []
+        if imports:
+            chunks.append("@layer ficgen;\n" + "\n".join(imports))
+        chunks.append(baseCss.rstrip("\n"))
+        if bodyCss.strip():
+            chunks.append(bodyCss.rstrip("\n"))
+        _writeTextFile(outCssPath, "\n\n".join(chunks) + "\n", written)
+        return
+
+    if config.customCssMode == "replace":
+        msg = "Custom CSS mode is 'replace', but no custom CSS file was provided."
+        raise StoryParseError(msg)
+
     cssText = resources.files("ficgen").joinpath("static/style.css").read_text(encoding="utf-8")
     renderedCss = _applyFontConfig(cssText, config)
-    _writeTextFile(outputDir / "style.css", renderedCss, written)
+    _writeTextFile(outCssPath, renderedCss, written)
 
 
 def _renderSingleStory(

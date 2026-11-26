@@ -23,6 +23,7 @@ from .kdlMeta import (
     parseKdlDocument,
 )
 from .models import (
+    DEFAULT_CUSTOM_CSS_NAME,
     DEFAULT_MONO_FONT,
     DEFAULT_SANS_FONT,
     DEFAULT_SERIF_FONT,
@@ -49,6 +50,90 @@ _FONT_BLOCK_SLOTS: t.Final[dict[str, str]] = {
     "mono": "mono",
     **_FONT_TOP_LEVEL_SLOTS,
 }
+_CSS_PATH_KEYS: t.Final[frozenset[str]] = frozenset({"css", "custom-css", "stylesheet"})
+_CSS_MODE_KEYS: t.Final[frozenset[str]] = frozenset({"css-mode", "custom-css-mode", "stylesheet-mode"})
+
+
+def _parseCssMode(rawMode: str, sourceDesc: str) -> t.CssMode:
+    """Validate a KDL CSS mode string ('append' or 'replace')."""
+    lowered = rawMode.strip().lower()
+    if lowered == "append":
+        return "append"
+    if lowered == "replace":
+        return "replace"
+    msg = f"Invalid CSS mode {rawMode!r} in {sourceDesc} (expected 'append' or 'replace')."
+    raise StoryParseError(msg)
+
+
+def _extractCustomCssConfig(
+    configDoc: kdl.Document,
+    configPath: Path | None,
+    defaultCssDir: Path,
+    sourceDesc: str,
+) -> tuple[Path | None, t.CssMode]:
+    """Extract optional custom CSS file path and append/replace mode from site.kdl or site.css."""
+    explicitPathStr: str | None = None
+    explicitDisabled = False
+    cssMode: t.CssMode = "append"
+
+    for node in configDoc.nodes:
+        key = normalizeKey(node.name)
+        if key in _CSS_PATH_KEYS:
+            if node.args:
+                first = node.args[0]
+                isDisabled = (
+                    first is None
+                    or isinstance(first, kdl.Null)
+                    or (isinstance(first, bool) and not first)
+                    or (isinstance(first, kdl.Bool) and not first.value)
+                )
+                if isDisabled:
+                    explicitPathStr = None
+                    explicitDisabled = True
+                else:
+                    val = coerceStringValue(first, node.name, sourceDesc)
+                    if val:
+                        explicitPathStr = val
+                        explicitDisabled = False
+                    else:
+                        explicitPathStr = None
+                        explicitDisabled = True
+            for propName, propVal in node.props.items():
+                if normalizeKey(propName) in {"mode", "css-mode"}:
+                    rawMode = coerceStringValue(propVal, propName, sourceDesc)
+                    if rawMode:
+                        cssMode = _parseCssMode(rawMode, sourceDesc)
+        elif key in _CSS_MODE_KEYS and node.args:
+            rawMode = coerceStringValue(node.args[0], node.name, sourceDesc)
+            if rawMode:
+                cssMode = _parseCssMode(rawMode, sourceDesc)
+
+    if explicitPathStr is not None:
+        rawPath = Path(explicitPathStr).expanduser()
+        baseDir = configPath.parent if configPath is not None else defaultCssDir
+        resolvedPath = rawPath if rawPath.is_absolute() else baseDir / rawPath
+        if not resolvedPath.is_file():
+            msg = f"Custom CSS file does not exist: {resolvedPath}"
+            raise StoryParseError(msg)
+        return (resolvedPath, cssMode)
+
+    if explicitDisabled:
+        if cssMode == "replace":
+            msg = f"CSS mode is 'replace' in {sourceDesc}, but custom CSS is disabled."
+            raise StoryParseError(msg)
+        return (None, cssMode)
+
+    candidate = defaultCssDir / DEFAULT_CUSTOM_CSS_NAME
+    if candidate.is_file():
+        return (candidate, cssMode)
+
+    if cssMode == "replace":
+        msg = (
+            f"CSS mode is 'replace' in {sourceDesc}, but no custom CSS file was found "
+            + f"(expected {candidate} or an explicit `css` path)."
+        )
+        raise StoryParseError(msg)
+    return (None, cssMode)
 
 
 def _extractFontConfig(configDoc: kdl.Document, sourceDesc: str) -> tuple[str, str, str]:
@@ -461,6 +546,10 @@ def buildConfigFromArgs(argv: t.Sequence[str] | None = None) -> SiteConfig:
     includeDrafts = bool(args.drafts) or kdlDrafts
     localBrowsing = getBoolField(configDoc, "local-browsing", default=True, sourceDesc=configSource)
     fontSerif, fontSans, fontMono = _extractFontConfig(configDoc, configSource)
+    defaultCssDir = (
+        configPath.parent if configPath is not None else (cliStories.parent if cliStories else defaultOutput)
+    )
+    customCssPath, customCssMode = _extractCustomCssConfig(configDoc, configPath, defaultCssDir, configSource)
 
     return SiteConfig(
         storiesDir=storiesDir,
@@ -474,6 +563,8 @@ def buildConfigFromArgs(argv: t.Sequence[str] | None = None) -> SiteConfig:
         fontSerif=fontSerif,
         fontSans=fontSans,
         fontMono=fontMono,
+        customCssPath=customCssPath,
+        customCssMode=customCssMode,
     )
 
 

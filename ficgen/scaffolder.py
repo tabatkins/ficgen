@@ -11,6 +11,7 @@ import kdl
 from . import t
 from .kdlMeta import StoryParseError
 from .models import (
+    DEFAULT_CUSTOM_CSS_NAME,
     DEFAULT_MONO_FONT,
     DEFAULT_SANS_FONT,
     DEFAULT_SERIF_FONT,
@@ -197,6 +198,7 @@ def _buildDefaultSiteKdl() -> str:
         + f'// font-serif "{DEFAULT_SERIF_FONT}"    // presets: old-style, transitional, slab-serif, antique, didone (or custom CSS font stack)\n'
         + f'// font-sans "{DEFAULT_SANS_FONT}"  // presets: neogrotesque, system-ui, humanist, geometric-humanist, classical-humanist, industrial, rounded-sans, handwritten\n'
         + f'// font-mono "{DEFAULT_MONO_FONT}"     // presets: mono-code, mono-slab-serif (or custom CSS font stack)\n'
+        + f'// css "{DEFAULT_CUSTOM_CSS_NAME}" mode="append"  // optional custom CSS (auto-loaded if {DEFAULT_CUSTOM_CSS_NAME} exists); mode: "append" or "replace"\n'
     )
 
 

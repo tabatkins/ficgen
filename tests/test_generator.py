@@ -631,3 +631,81 @@ def test_custom_font_stack_appends_generic_fallback_and_validates_position(
         assert main(["build", "--stories", str(storiesDir), "--output", str(outDir), "--config", str(cfgPath)]) == 1
         captured = capsys.readouterr()
         assert "must be at the end" in captured.err
+
+
+def test_default_stylesheet_wrapped_in_ficgen_layer() -> None:
+    """Packaged style.css wraps all built-in rules in a `@layer ficgen` block."""
+    cssText = resources.files("ficgen").joinpath("static/style.css").read_text(encoding="utf-8")
+    assert "\n@layer ficgen {\n" in cssText
+    assert cssText.rstrip().endswith("}")
+
+
+def test_custom_css_auto_discovery_append_replace_and_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Custom CSS supports auto-discovered site.css, custom paths, append/replace modes, and @import hoisting."""
+    siteDir = tmp_path / "site"
+    _createSampleStories(siteDir / "_stories")
+    (siteDir / "site.css").write_text(
+        '@import url("https://example.com/custom-font.css");\n\n' + ":root {\n  --accent: rebeccapurple;\n}\n",
+        encoding="utf-8",
+    )
+
+    # Auto-discovers site.css in site root (even without site.kdl) and appends outside @layer ficgen.
+    monkeypatch.chdir(siteDir)
+    assert main(["build"]) == 0
+    appendedCss = (siteDir / "style.css").read_text(encoding="utf-8")
+    layerDeclPos = appendedCss.index("@layer ficgen;")
+    importPos = appendedCss.index('@import url("https://example.com/custom-font.css");')
+    layerStart = appendedCss.index("@layer ficgen {")
+    overridePos = appendedCss.index(":root {\n  --accent: rebeccapurple;")
+    assert layerDeclPos == 0
+    assert layerDeclPos < importPos < layerStart < overridePos
+    # Ensure the custom override starts outside the @layer ficgen closing brace.
+    assert appendedCss[layerStart:overridePos].rstrip().endswith("\n}")
+
+    # `css mode="replace"` (or `css-mode "replace"`) replaces ficgen's built-in CSS completely.
+    cfgPath = siteDir / "site.kdl"
+    cfgPath.write_text('css mode="replace"\n', encoding="utf-8")
+    assert main(["build"]) == 0
+    replacedCss = (siteDir / "style.css").read_text(encoding="utf-8")
+    assert "@layer ficgen" not in replacedCss
+    assert replacedCss == (siteDir / "site.css").read_text(encoding="utf-8")
+
+    # Custom location in site.kdl resolved relative to site.kdl, with `css-mode "append"`.
+    assetsDir = siteDir / "_assets"
+    assetsDir.mkdir()
+    (assetsDir / "theme.css").write_text("body { background: ivory; }\n", encoding="utf-8")
+    cfgPath.write_text('css "_assets/theme.css"\ncss-mode "append"\n', encoding="utf-8")
+    assert main(["build"]) == 0
+    customLocCss = (siteDir / "style.css").read_text(encoding="utf-8")
+    assert "@layer ficgen;" not in customLocCss
+    assert "@layer ficgen {" in customLocCss
+    assert "body { background: ivory; }" in customLocCss
+    assert "rebeccapurple" not in customLocCss
+
+    # `css false` disables auto-discovered site.css.
+    cfgPath.write_text("css false\n", encoding="utf-8")
+    assert main(["build"]) == 0
+    disabledCss = (siteDir / "style.css").read_text(encoding="utf-8")
+    assert "@layer ficgen {" in disabledCss
+    assert "rebeccapurple" not in disabledCss
+
+    # Error cases: missing custom CSS path, invalid mode, replace without CSS, and self-overwrite.
+    cfgPath.write_text('css "does-not-exist.css"\n', encoding="utf-8")
+    assert main(["build"]) == 1
+    assert "does not exist" in capsys.readouterr().err
+
+    cfgPath.write_text('css "_assets/theme.css" mode="invalid"\n', encoding="utf-8")
+    assert main(["build"]) == 1
+    assert "Invalid CSS mode" in capsys.readouterr().err
+
+    cfgPath.write_text('css false\ncss-mode "replace"\n', encoding="utf-8")
+    assert main(["build"]) == 1
+    assert "replace" in capsys.readouterr().err
+
+    cfgPath.write_text('css "style.css"\n', encoding="utf-8")
+    assert main(["build"]) == 1
+    assert "same as the generated output stylesheet" in capsys.readouterr().err

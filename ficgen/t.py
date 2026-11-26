@@ -11,6 +11,7 @@ __all__ = [
     "Any",
     "Callable",
     "ChatSide",
+    "CssMode",
     "Final",
     "FontRole",
     "Iterable",
@@ -41,6 +42,7 @@ UNSET: Final[_UnsetType] = _UnsetType()
 type Unset = _UnsetType
 
 type ChatSide = Literal["left", "right"]
+type CssMode = Literal["append", "replace"]
 type FontRole = Literal["serif", "sans", "mono"]
 type StampAction = Literal["stamped", "would_stamp", "skipped_existing", "skipped_draft"]
 type TaxonomyKind = Literal[

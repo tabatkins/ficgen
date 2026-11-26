@@ -186,6 +186,7 @@ def test_cli_init_scaffolds_empty_folder_and_builds_cleanly(
     assert '// font-serif "old-style"' in siteKdlText
     assert '// font-sans "neogrotesque"' in siteKdlText
     assert '// font-mono "mono-code"' in siteKdlText
+    assert '// css "site.css" mode="append"' in siteKdlText
     assert "// planned-chapters" in storyKdl.read_text(encoding="utf-8")
 
     # Running `ficgen build` right away succeeds with zero warnings and generates both stories.
@@ -243,6 +244,7 @@ def test_init_site_commented_metadata_is_valid_when_uncommented(
     for createdPath in result.createdFiles:
         raw = createdPath.read_text(encoding="utf-8")
         createdPath.write_text(commentRe.sub("", raw), encoding="utf-8")
+    (archiveDir / "site.css").write_text(":root { --accent: rebeccapurple; }\n", encoding="utf-8")
 
     monkeypatch.chdir(archiveDir)
     config = buildConfigFromArgs(["--drafts"])
@@ -251,3 +253,4 @@ def test_init_site_commented_metadata_is_valid_when_uncommented(
     generateSite(archive)
     assert (archiveDir / "example-one-shot" / "index.html").is_file()
     assert (archiveDir / "example-multi-chapter" / "ch2.html").is_file()
+    assert "--accent: rebeccapurple;" in (archiveDir / "style.css").read_text(encoding="utf-8")

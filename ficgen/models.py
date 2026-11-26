@@ -12,6 +12,7 @@ from . import t
 from .kdlMeta import StoryParseError, normalizeKey
 
 DEFAULT_STORIES_DIR_NAME: t.Final[str] = "_stories"
+DEFAULT_CUSTOM_CSS_NAME: t.Final[str] = "site.css"
 DEFAULT_SERIF_FONT: t.Final[str] = "old-style"
 DEFAULT_SANS_FONT: t.Final[str] = "neogrotesque"
 DEFAULT_MONO_FONT: t.Final[str] = "mono-code"
@@ -246,6 +247,8 @@ class SiteConfig:
     fontSerif: str = DEFAULT_SERIF_FONT
     fontSans: str = DEFAULT_SANS_FONT
     fontMono: str = DEFAULT_MONO_FONT
+    customCssPath: Path | None = None
+    customCssMode: t.CssMode = "append"
 
     def normalizedBaseUrl(self) -> str:
         """Return baseUrl guaranteed to end with a single slash."""

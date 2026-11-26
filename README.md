@@ -76,11 +76,14 @@ base-url "https://example.com/fic/"
 // font-serif "old-style"
 // font-sans "neogrotesque"
 // font-mono "mono-code"
+// css "site.css" mode="append"
 ```
 
-Relative `stories` paths (aliases: `stories-dir`, `stories-directory`) are resolved relative to the directory containing `site.kdl`. When `local-browsing` is `true` (the default), each HTML page includes a tiny script that rewrites relative directory links to `index.html` only when viewed over `file://`; set `local-browsing false` to omit it.
+Relative `stories` and `css` paths (aliases: `stories-dir`, `stories-directory`; `custom-css`, `stylesheet`) are resolved relative to the directory containing `site.kdl`. When `local-browsing` is `true` (the default), each HTML page includes a tiny script that rewrites relative directory links to `index.html` only when viewed over `file://`; set `local-browsing false` to omit it.
 
 **Fonts:** Set `font-serif`, `font-sans`, and `font-mono` (or group them in a `fonts { serif "..."; sans "..."; mono "..." }` block) to any built-in preset name—`system-ui`, `transitional`, `old-style`, `humanist`, `geometric-humanist`, `classical-humanist`, `neogrotesque`, `mono-slab-serif`, `mono-code`, `industrial`, `rounded-sans`, `slab-serif`, `antique`, `didone`, `handwritten`—or supply a custom CSS font stack (either as a single CSS string like `"'Literata', Georgia, serif"` or as multiple KDL string arguments like `font-serif "Literata" "Georgia"`). Custom stacks without an ultimate generic fallback automatically have `serif`, `sans-serif`, or `monospace` appended; placing a generic fallback keyword before another font fails the build with an error.
+
+**Custom CSS:** Ficgen's built-in stylesheet is wrapped in `@layer ficgen`. If a `site.css` file exists in the site root (next to `site.kdl` or `_stories/`), it is automatically appended *outside* `@layer ficgen` so unlayered rules easily override defaults (any leading `@import` rules in your CSS are hoisted to the top of `style.css`). Set `css "path/to/custom.css"` to use a different file, `css false` to ignore `site.css`, and `mode="replace"` (or `css-mode "replace"`) to replace the built-in stylesheet completely instead of appending.
 
 #### Generated Output
 
