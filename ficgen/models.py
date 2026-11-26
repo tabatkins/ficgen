@@ -10,6 +10,8 @@ from pathlib import Path
 
 from . import t
 
+DEFAULT_STORIES_DIR_NAME: t.Final[str] = "_stories"
+
 TAXONOMY_SPECS: t.Final[tuple[tuple[t.TaxonomyKind, str, str], ...]] = (
     ("fandoms", "Fandoms", "Fandom"),
     ("categories", "Categories", "Category"),
@@ -76,7 +78,7 @@ class TaxonomyItem(t.NamedTuple):
 class SiteConfig:
     """Configuration for building the static fiction archive."""
 
-    storiesDir: Path = Path("stories")
+    storiesDir: Path = Path(DEFAULT_STORIES_DIR_NAME)
     outputDir: Path = Path(".")
     title: str = "Fiction Archive"
     subtitle: str = ""

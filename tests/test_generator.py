@@ -10,7 +10,7 @@ from xml.parsers import expat
 import pytest
 
 from ficgen import t
-from ficgen.cli import main
+from ficgen.cli import buildConfigFromArgs, main
 from ficgen.generator import generateSite
 from ficgen.models import SiteConfig
 from ficgen.parser import loadArchive
@@ -157,7 +157,7 @@ def _createSampleStories(storiesDir: Path) -> Path:
 
 def test_generate_site_from_sample_stories(tmp_path: Path) -> None:
     """End-to-end build creates valid HTML, taxonomy pages, chat bubbles, and Atom feed."""
-    storiesDir = _createSampleStories(tmp_path / "stories")
+    storiesDir = _createSampleStories(tmp_path / "_stories")
     outDir = tmp_path / "out"
     config = SiteConfig(
         storiesDir=storiesDir,
@@ -224,7 +224,7 @@ def test_generate_site_from_sample_stories(tmp_path: Path) -> None:
 
 def test_draft_toggle_cleans_stale_chapter_pages(tmp_path: Path) -> None:
     """Rebuilding without --drafts removes stale unpublished chapter HTML files."""
-    storiesDir = _createSampleStories(tmp_path / "stories")
+    storiesDir = _createSampleStories(tmp_path / "_stories")
     outDir = tmp_path / "out"
 
     draftExit = main(
@@ -258,7 +258,7 @@ def test_draft_toggle_cleans_stale_chapter_pages(tmp_path: Path) -> None:
 
 def test_cli_reads_kdl_config_and_handles_missing_stories_dir(tmp_path: Path) -> None:
     """CLI applies KDL site settings and returns exit code 1 for missing story paths."""
-    storiesDir = _createSampleStories(tmp_path / "stories")
+    storiesDir = _createSampleStories(tmp_path / "_stories")
     cfgPath = tmp_path / "site.kdl"
     cfgPath.write_text(
         'title "Custom Archive"\nsubtitle "Short stories"\nauthor "Writer"\n',
@@ -286,7 +286,7 @@ def test_cli_reads_kdl_config_and_handles_missing_stories_dir(tmp_path: Path) ->
 
 def test_published_and_updated_date_labels(tmp_path: Path) -> None:
     """Single-date stories show Published only; multi-date stories show both Published and Updated."""
-    storiesDir = tmp_path / "stories"
+    storiesDir = tmp_path / "_stories"
 
     oneShot = storiesDir / "one-shot"
     oneShot.mkdir(parents=True)
@@ -327,7 +327,7 @@ def test_build_warns_on_undated_published_stories_and_chapters(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Published stories/chapters missing Date: log warnings, while drafts do not."""
-    storiesDir = tmp_path / "stories"
+    storiesDir = tmp_path / "_stories"
 
     dated = storiesDir / "dated"
     dated.mkdir(parents=True)
@@ -364,3 +364,101 @@ def test_build_warns_on_undated_published_stories_and_chapters(
     with caplog.at_level(logging.WARNING, logger="ficgen"):
         assert main(["--stories", str(storiesDir), "--output", str(outDir), "--drafts"]) == 0
     assert caplog.records == []
+
+
+def test_default_stories_dir_resolution_and_cli_workflow(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default source directory is `_stories` for SiteConfig and all CLI subcommands."""
+    assert SiteConfig().storiesDir == Path("_stories")
+
+    # Even if a legacy/output `stories/` directory exists, defaults still resolve to `_stories/`.
+    (tmp_path / "stories").mkdir()
+    monkeypatch.chdir(tmp_path)
+    initialConfig = buildConfigFromArgs([])
+    assert initialConfig.storiesDir == tmp_path / "_stories"
+    assert initialConfig.outputDir == tmp_path
+
+    # `ficgen new`, `ficgen stamp`, and `ficgen` (build) use `./_stories` by default.
+    assert main(["new", "Default Folder Tale", "--published"]) == 0
+    storyFile = tmp_path / "_stories" / "default-folder-tale" / "index.md"
+    assert storyFile.is_file()
+
+    assert main(["stamp", "--force", "--date", "2026-11-26"]) == 0
+    assert 'date "2026-11-26"' in storyFile.read_text(encoding="utf-8")
+
+    # Resolving from a subdirectory finds `../_stories` and outputs to parent.
+    subDir = tmp_path / "subdir"
+    subDir.mkdir()
+    monkeypatch.chdir(subDir)
+    subConfig = buildConfigFromArgs([])
+    assert subConfig.storiesDir == tmp_path / "_stories"
+    assert subConfig.outputDir == tmp_path
+
+    assert main([]) == 0
+    assert (tmp_path / "index.html").is_file()
+    assert (tmp_path / "default-folder-tale" / "index.html").is_file()
+
+
+def test_site_kdl_configures_stories_dir_across_cli_commands(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`site.kdl` can configure the stories directory for build, new, and stamp, overridable via CLI."""
+    siteDir = tmp_path / "site"
+    siteDir.mkdir()
+    cfgPath = siteDir / "site.kdl"
+    cfgPath.write_text(
+        'title "Configured Archive"\nstories "fics"\n',
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(siteDir)
+    cfg = buildConfigFromArgs([])
+    assert cfg.storiesDir == siteDir / "fics"
+    assert cfg.outputDir == siteDir
+
+    # `new`, `stamp`, and `build` all use the `site.kdl` stories directory.
+    assert main(["new", "Configured Tale", "--published"]) == 0
+    storyFile = siteDir / "fics" / "configured-tale" / "index.md"
+    assert storyFile.is_file()
+    assert not (siteDir / "_stories").exists()
+
+    assert main(["stamp", "--force", "--date", "2026-11-26"]) == 0
+    assert 'date "2026-11-26"' in storyFile.read_text(encoding="utf-8")
+
+    # Running from a subdirectory finds ../site.kdl and resolves `stories` relative to site.kdl.
+    monkeypatch.chdir(siteDir / "fics")
+    subCfg = buildConfigFromArgs([])
+    assert subCfg.storiesDir == siteDir / "fics"
+    assert subCfg.outputDir == siteDir
+
+    assert main([]) == 0
+    assert "Configured Archive" in (siteDir / "index.html").read_text(encoding="utf-8")
+    assert (siteDir / "configured-tale" / "index.html").is_file()
+
+    # Explicit --config from an unrelated directory resolves relative `stories` against site.kdl.
+    otherDir = tmp_path / "elsewhere"
+    otherDir.mkdir()
+    monkeypatch.chdir(otherDir)
+    explicitCfg = buildConfigFromArgs(["--config", str(cfgPath)])
+    assert explicitCfg.storiesDir == siteDir / "fics"
+
+    # Explicit --stories overrides site.kdl while retaining other site.kdl values.
+    overrideDir = tmp_path / "override"
+    overrideCfg = buildConfigFromArgs(["--config", str(cfgPath), "--stories", str(overrideDir)])
+    assert overrideCfg.storiesDir == overrideDir
+    assert overrideCfg.title == "Configured Archive"
+
+    # `stories-dir` alias and absolute paths are supported.
+    absStoriesDir = tmp_path / "abs-stories"
+    altCfgPath = tmp_path / "alt.kdl"
+    altCfgPath.write_text(f'stories-dir "{absStoriesDir.as_posix()}"\n', encoding="utf-8")
+    altCfg = buildConfigFromArgs(["--config", str(altCfgPath)])
+    assert altCfg.storiesDir == absStoriesDir
+
+    # Non-string stories value in site.kdl fails cleanly.
+    badCfgPath = tmp_path / "bad.kdl"
+    badCfgPath.write_text("stories 123\n", encoding="utf-8")
+    assert main(["--config", str(badCfgPath)]) == 1

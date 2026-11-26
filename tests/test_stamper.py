@@ -103,7 +103,7 @@ def test_stamp_stories_targets_chapters_and_skips_drafts(tmp_path: Path) -> None
 
 def test_stamp_cli_subcommand_and_slug_targeting(tmp_path: Path) -> None:
     """`ficgen stamp` supports story slug targets, --date, --drafts, and rejects bad dates."""
-    storiesDir = tmp_path / "stories"
+    storiesDir = tmp_path / "_stories"
     storyDir = storiesDir / "alpha"
     storyDir.mkdir(parents=True)
     storyFile = storyDir / "index.md"

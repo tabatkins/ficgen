@@ -1,4 +1,4 @@
-"""Import works from AO3-compatible archives or EPUB downloads into stories/."""
+"""Import works from AO3-compatible archives or EPUB downloads into _stories/."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ _LOG: t.Final[logging.Logger] = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class ImportOptions:
-    """Configuration for importing a work into a stories/ directory."""
+    """Configuration for importing a work into a _stories/ directory."""
 
     storiesDir: Path
     archiveUrl: str = ao3fetch.DEFAULT_BASE_URL
@@ -30,7 +30,7 @@ class ImportOptions:
 
 @dataclass(slots=True)
 class ImportResult:
-    """Outcome of importing one AO3 work into stories/."""
+    """Outcome of importing one AO3 work into _stories/."""
 
     title: str
     slug: str
@@ -132,7 +132,7 @@ def writeImportedWork(
     *,
     chapterDates: t.Mapping[int, str] | None = None,
 ) -> ImportResult:
-    """Write a fetched or downloaded AO3 work into stories/<slug>/ in KDL + Markdown format."""
+    """Write a fetched or downloaded AO3 work into _stories/<slug>/ in KDL + Markdown format."""
     slug = resolveStorySlug(work.title, options.slug)
     storyDir = options.storiesDir / slug
     if storyDir.exists():

@@ -1,6 +1,6 @@
 # ficgen
 
-A static site generator for personal fiction archives. Reads Markdown story documents and KDL metadata (`kdl-py`) from a `stories/` directory and outputs clean, literary static HTML, CSS (with light/dark mode), static taxonomy browse pages, and an Atom 1.0 feed.
+A static site generator for personal fiction archives. Reads Markdown story documents and KDL metadata (`kdl-py`) from a `_stories/` directory and outputs clean, literary static HTML, CSS (with light/dark mode), static taxonomy browse pages, and an Atom 1.0 feed.
 
 ## Installation
 
@@ -31,19 +31,19 @@ pip install -r requirements-dev.txt
 ### Building the Archive (`ficgen` / `ficgen build`)
 
 ```sh
-ficgen                              # build published stories from ./stories into .
+ficgen                              # build published stories from ./_stories into .
 ficgen build                        # explicit equivalent
 ficgen --drafts                     # include published false stories and chapters
-ficgen --stories path/to/stories --output path/to/out
+ficgen --stories path/to/_stories --output path/to/out
 ```
 
 #### Build Options
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--stories PATH` | `./stories` (or `../stories`) | Source directory containing story subdirectories. |
+| `--stories PATH` | `site.kdl` `stories`, or `./_stories` (or `../_stories`) | Source directory containing story subdirectories. |
 | `--output PATH` | `.` (or `..`) | Output directory for generated HTML, CSS, and feed. |
-| `--config PATH` | `<stories>/../site.kdl` if present | Optional KDL site configuration file. |
+| `--config PATH` | `./site.kdl` (or `../site.kdl`, or `<stories>/../site.kdl`) if present | Optional KDL site configuration file. |
 | `--title TEXT` | `"Fiction Archive"` | Archive title (overrides `site.kdl`). |
 | `--subtitle TEXT` | `""` | Subtitle shown on the archive index page. |
 | `--author TEXT` | `""` | Default author name for stories and Atom feed entries. |
@@ -52,15 +52,18 @@ ficgen --stories path/to/stories --output path/to/out
 
 #### Site Configuration (`site.kdl`)
 
-If `site.kdl` exists next to `stories/`, `ficgen` loads it automatically. CLI flags override values in `site.kdl`.
+If `site.kdl` exists in the site root (`.` or `..`, or next to `--stories`), `ficgen` loads it automatically across all subcommands. CLI flags override values in `site.kdl`.
 
 ```kdl
 title "My Fiction Archive"
 subtitle "Original fiction and fanworks."
 author "Alex Rivera"
 base-url "https://example.com/fic/"
+// stories "_stories"
 // include-drafts false
 ```
+
+Relative `stories` paths (aliases: `stories-dir`, `stories-directory`) are resolved relative to the directory containing `site.kdl`.
 
 #### Generated Output
 
@@ -80,14 +83,14 @@ output/
     └── all.html                        # "Entire Work" combined view
 ```
 
-Rebuilding cleans stale `.html` files inside known story folders and regenerates `browse/` from scratch, while leaving `stories/` and non-HTML files untouched. If any published story or chapter is missing an explicit `date` metadata node, `ficgen` logs a `WARNING` to `stderr` via Python's `logging` module suggesting `ficgen stamp`.
+Rebuilding cleans stale `.html` files inside known story folders and regenerates `browse/` from scratch, while leaving `_stories/` and non-HTML files untouched. If any published story or chapter is missing an explicit `date` metadata node, `ficgen` logs a `WARNING` to `stderr` via Python's `logging` module suggesting `ficgen stamp`.
 
 ### Initializing a New Story (`ficgen new` / `ficgen init`)
 
-Creates a new story folder under `stories/<slug>/` with valid KDL metadata and starter Markdown files:
+Creates a new story folder under `_stories/<slug>/` with valid KDL metadata and starter Markdown files:
 
 ```sh
-ficgen new "Midnight Rain"                                      # one-shot: stories/midnight-rain/index.md (draft)
+ficgen new "Midnight Rain"                                      # one-shot: _stories/midnight-rain/index.md (draft)
 ficgen new --multi "Starlight Drift"                            # multi-chapter: story.kdl + ch1.md (draft)
 ficgen new --chapters 3 "Long Arc"                              # multi-chapter: story.kdl + ch1.md..ch3.md
 ficgen new "Quick Shot" --published --fandom "Original Work" --category "F/F" --tag "fluff"
@@ -104,11 +107,12 @@ ficgen init "Alias Example" --slug custom-slug                  # `init` is an a
 | `--published` | `false` | Omit `published false` and stamp today's `date` (default starts stories as drafts). |
 | `--date DATE` | `""` | Explicit ISO-8601 `date` to include in starter metadata. |
 | `--fandom`, `--category`, `--relationship`, `--character`, `--tag` | `""` | Repeatable metadata tags to pre-populate. |
-| `--stories PATH` | `./stories` (or `../stories`) | Stories directory where the new folder is created. |
+| `--stories PATH` | `site.kdl` `stories`, or `./_stories` (or `../_stories`) | Stories directory where the new folder is created. |
+| `--config PATH` | `./site.kdl` (or `../site.kdl`) if present | Optional KDL site configuration file. |
 
 ### Importing from AO3-Compatible Archives (`ficgen import`)
 
-Imports stories directly from AO3, any AO3-compatible archive (such as Superlove or SquidgeWorld), or local AO3 `.epub` downloads into `stories/<slug>/` using [`ao3fetch`](https://github.com/tabatkins/ao3fetch):
+Imports stories directly from AO3, any AO3-compatible archive (such as Superlove or SquidgeWorld), or local AO3 `.epub` downloads into `_stories/<slug>/` using [`ao3fetch`](https://github.com/tabatkins/ao3fetch):
 
 ```sh
 ficgen import https://archiveofourown.org/works/123456
@@ -123,9 +127,10 @@ ficgen import path/to/downloaded-work.epub --draft
 | --- | --- | --- |
 | `--archive URL` | `https://archiveofourown.org` | Archive base URL used for bare numeric work IDs (full URLs auto-detect their host). |
 | `--slug SLUG` | slugified from title | Custom directory/URL slug (when importing a single work). |
-| `--stories PATH` | `./stories` (or `../stories`) | Destination stories directory. |
+| `--stories PATH` | `site.kdl` `stories`, or `./_stories` (or `../_stories`) | Destination stories directory. |
+| `--config PATH` | `./site.kdl` (or `../site.kdl`) if present | Optional KDL site configuration file. |
 | `--draft` | `false` | Mark imported story/chapters as `published false`. |
-| `--force` | `false` | Overwrite an existing `stories/<slug>/` directory. |
+| `--force` | `false` | Overwrite an existing `_stories/<slug>/` directory. |
 | `--cookie COOKIE` | `""` | Optional `Cookie` header for importing restricted/logged-in works. |
 
 Import behavior:
@@ -141,14 +146,14 @@ Inserts `date "YYYY-MM-DD"` into the KDL metadata blocks of undated story/chapte
 ficgen stamp --dry-run                          # preview which files would be modified
 ficgen stamp                                    # stamp all published, undated stories/chapters with today's date
 ficgen stamp starlight-drift --date 2026-10-12  # stamp a specific story slug, directory, or .md file
-ficgen stamp stories/midnight-rain/index.md --date 2026-08-03
+ficgen stamp _stories/midnight-rain/index.md --date 2026-08-03
 ficgen stamp --force --date 2026-10-12          # overwrite existing date entries
 ficgen stamp --drafts                           # also stamp files marked published false
 ```
 
 #### Stamp Behavior
 
-- **Targets:** With no positional arguments, scans every story folder in `--stories`. Positional arguments accept story slugs (resolved inside `--stories`), directory paths, or individual `.md` files.
+- **Targets:** With no positional arguments, scans every story folder in `--stories` (or `site.kdl`'s `stories` directory). Positional arguments accept story slugs (resolved inside the stories directory), directory paths, or individual `.md` files.
 - **Single-doc vs. multi-chapter:** Stamps `index.md` for single-doc stories, and stamps chapter files (`chN.md`) for multi-chapter stories (leaving `story.kdl` untouched, since story `Published` and `Updated` dates derive automatically from chapter dates).
 - **Idempotent & draft-safe:** Parses KDL with `kdl-py` (so `//` comments and `/-` slashdashed nodes are ignored), skips files that already have a non-empty `date` / `published-date` node (unless `--force` is set), fills `date null` / empty nodes in place, and skips `published false` files (unless `--drafts` is set).
 - **Formatting preservation:** Only modifies the KDL metadata block (or inserts one after `# Title` / at the top if absent), preserving prose, KDL comments, and line endings.
@@ -157,14 +162,14 @@ ficgen stamp --drafts                           # also stamp files marked publis
 
 ## 2. Story Structure & KDL Metadata
 
-Each story lives in its own subdirectory under `stories/<slug>/`. The directory name becomes the story's URL slug (`/<slug>/`). Directories starting with `.` or `_` are ignored.
+Each story lives in its own subdirectory under `_stories/<slug>/`. The directory name becomes the story's URL slug (`/<slug>/`). Directories starting with `.` or `_` are ignored.
 
 ### Single-Document Stories (One-Shots)
 
 A folder containing `index.md` with an inline KDL metadata block (` ```metadata ` or a leading ` ```kdl ` fence):
 
 ```text
-stories/midnight-rain/
+_stories/midnight-rain/
 └── index.md
 ```
 
@@ -194,7 +199,7 @@ Story prose begins here...
 A folder containing a whole-work KDL file (`story.kdl`) plus chapter Markdown files (`ch1.md`, `ch2.md`, ...):
 
 ```text
-stories/starlight-drift/
+_stories/starlight-drift/
 ├── story.kdl   # Whole-work title, shared metadata, optional work-level summary/notes
 ├── ch1.md      # Chapter 1 metadata, optional chapter notes, prose
 └── ch2.md      # Chapter 2 (can be marked published false while in progress)

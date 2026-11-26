@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 import ao3fetch
+import pytest
 
 from ficgen.cli import main
 from ficgen.generator import generateSite
@@ -174,7 +175,7 @@ def test_import_single_doc_from_superlove_and_build(tmp_path: Path) -> None:
     routes = {
         "https://superlove.sayitditto.net/works/1269?view_full_work=true&view_adult=true": (200, _WORK_SINGLE_HTML),
     }
-    storiesDir = tmp_path / "stories"
+    storiesDir = tmp_path / "_stories"
     outDir = tmp_path / "out"
 
     ao3fetch.setFetcher(_makeRouteFetcher(routes))
@@ -211,7 +212,7 @@ def test_import_multichapter_work_creates_story_kdl_and_chapter_dates(tmp_path: 
         "https://archiveofourown.org/works/555?view_full_work=true&view_adult=true": (200, _WORK_MULTI_FULL_HTML),
         "https://archiveofourown.org/works/555/navigate": (200, _WORK_NAVIGATE_HTML),
     }
-    storiesDir = tmp_path / "stories"
+    storiesDir = tmp_path / "_stories"
     outDir = tmp_path / "out"
 
     ao3fetch.setFetcher(_makeRouteFetcher(routes))
@@ -251,7 +252,7 @@ def test_import_local_epub_and_error_cases(tmp_path: Path) -> None:
     """`ficgen import` supports local EPUBs, rejects overwrites without --force, and fails on locked works."""
     epubPath = tmp_path / "work.epub"
     epubPath.write_bytes(_buildTestEpub())
-    storiesDir = tmp_path / "stories"
+    storiesDir = tmp_path / "_stories"
 
     assert main(["import", str(epubPath), "--stories", str(storiesDir), "--draft"]) == 0
     assert (storiesDir / "epub-story" / "index.md").is_file()
@@ -272,3 +273,31 @@ def test_import_local_epub_and_error_cases(tmp_path: Path) -> None:
     finally:
         ao3fetch.resetFetcher()
         ao3fetch.resetArchiveBaseUrl()
+
+
+def test_import_defaults_to_underscore_stories_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`ficgen import` writes into `./_stories` when `--stories` is omitted."""
+    epubPath = tmp_path / "work.epub"
+    epubPath.write_bytes(_buildTestEpub())
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["import", str(epubPath)]) == 0
+    assert (tmp_path / "_stories" / "epub-story" / "index.md").is_file()
+
+
+def test_import_respects_site_kdl_stories_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`ficgen import` uses the `stories` directory configured in `site.kdl`."""
+    epubPath = tmp_path / "work.epub"
+    epubPath.write_bytes(_buildTestEpub())
+    (tmp_path / "site.kdl").write_text('stories "custom-fics"\n', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["import", str(epubPath)]) == 0
+    assert (tmp_path / "custom-fics" / "epub-story" / "index.md").is_file()
+    assert not (tmp_path / "_stories").exists()

@@ -14,7 +14,7 @@ from . import t
 from .generator import BuildResult, generateSite
 from .importer import ImportOptions, importFromSource
 from .kdlMeta import StoryParseError, getBoolField, getStringField, parseKdlDocument
-from .models import SiteConfig
+from .models import DEFAULT_STORIES_DIR_NAME, SiteConfig
 from .parser import loadArchive
 from .scaffolder import InitOptions, initStory
 from .stamper import StampResult, defaultTodayDate, stampStories
@@ -30,20 +30,60 @@ def _loadKdlConfig(configPath: Path) -> kdl.Document:
     return parseKdlDocument(rawText, sourceDesc=str(configPath))
 
 
-def _resolveDefaultPaths() -> tuple[Path, Path]:
-    """Resolve default stories/ and output directories from cwd or package layout."""
+def _resolveSiteRoot() -> Path:
+    """Resolve the default site root from cwd or its parent directory."""
     cwd = Path.cwd()
-    if (cwd / "stories").is_dir():
-        return (cwd / "stories", cwd)
+    if (cwd / "site.kdl").is_file() or (cwd / DEFAULT_STORIES_DIR_NAME).is_dir():
+        return cwd
     parent = cwd.parent
-    if (parent / "stories").is_dir():
-        return (parent / "stories", parent)
-    return (cwd / "stories", cwd)
+    if (parent / "site.kdl").is_file() or (parent / DEFAULT_STORIES_DIR_NAME).is_dir():
+        return parent
+    return cwd
 
 
-def _buildArgParser() -> argparse.ArgumentParser:
-    """Create the CLI argument parser for building the site."""
+def _resolveDefaultPaths() -> tuple[Path, Path]:
+    """Resolve default _stories/ and output directories from cwd or package layout."""
+    siteRoot = _resolveSiteRoot()
+    return (siteRoot / DEFAULT_STORIES_DIR_NAME, siteRoot)
+
+
+def _resolveStoriesPathFromConfig(configDoc: kdl.Document, configPath: Path) -> Path | None:
+    """Read an optional stories directory from a KDL site config, resolved relative to configPath."""
+    kdlStories = getStringField(
+        configDoc,
+        "stories",
+        "stories-dir",
+        "stories-directory",
+        sourceDesc=str(configPath),
+    )
+    if not kdlStories:
+        return None
+    rawPath = Path(kdlStories).expanduser()
+    if rawPath.is_absolute():
+        return rawPath
+    return configPath.parent / rawPath
+
+
+def _resolveCliStoriesDir(cliStories: Path | None, cliConfig: Path | None) -> Path:
+    """Resolve storiesDir from explicit CLI flag, site.kdl, or default _stories/."""
+    if cliStories is not None:
+        return cliStories
     defaultStories, defaultOutput = _resolveDefaultPaths()
+    configPath = cliConfig
+    if configPath is None:
+        candidate = defaultOutput / "site.kdl"
+        if candidate.is_file():
+            configPath = candidate
+    if configPath is not None:
+        configDoc = _loadKdlConfig(configPath)
+        configured = _resolveStoriesPathFromConfig(configDoc, configPath)
+        if configured is not None:
+            return configured
+    return defaultStories
+
+
+def _buildArgParser(defaultStories: Path, defaultOutput: Path) -> argparse.ArgumentParser:
+    """Create the CLI argument parser for building the site."""
     parser = argparse.ArgumentParser(
         prog="ficgen",
         description="Build a static HTML fiction archive from Markdown story documents.",
@@ -59,8 +99,8 @@ def _buildArgParser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--stories",
         type=Path,
-        default=defaultStories,
-        help=f"Directory containing story folders (default: {defaultStories})",
+        default=None,
+        help=f"Directory containing story folders (default: {defaultStories}, or site.kdl stories)",
     )
     parser.add_argument(
         "--output",
@@ -123,8 +163,14 @@ def _stampArgParser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--stories",
         type=Path,
-        default=defaultStories,
-        help=f"Directory containing story folders (default: {defaultStories})",
+        default=None,
+        help=f"Directory containing story folders (default: {defaultStories}, or site.kdl stories)",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="Optional KDL configuration file (auto-loads site.kdl if present).",
     )
     parser.add_argument(
         "--date",
@@ -230,8 +276,14 @@ def _newArgParser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--stories",
         type=Path,
-        default=defaultStories,
-        help=f"Directory containing story folders (default: {defaultStories})",
+        default=None,
+        help=f"Directory containing story folders (default: {defaultStories}, or site.kdl stories)",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="Optional KDL configuration file (auto-loads site.kdl if present).",
     )
     return parser
 
@@ -264,8 +316,14 @@ def _importArgParser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--stories",
         type=Path,
-        default=defaultStories,
-        help=f"Destination stories directory (default: {defaultStories})",
+        default=None,
+        help=f"Destination stories directory (default: {defaultStories}, or site.kdl stories)",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="Optional KDL configuration file (auto-loads site.kdl if present).",
     )
     parser.add_argument(
         "--draft",
@@ -290,22 +348,28 @@ def _importArgParser() -> argparse.ArgumentParser:
 
 def buildConfigFromArgs(argv: t.Sequence[str] | None = None) -> SiteConfig:
     """Parse CLI arguments and optional KDL site config into a SiteConfig."""
-    parser = _buildArgParser()
+    defaultStories, defaultOutput = _resolveDefaultPaths()
+    parser = _buildArgParser(defaultStories, defaultOutput)
     args = parser.parse_args(argv)
 
-    storiesDir: Path = args.stories
+    cliStories: Path | None = args.stories
     outputDir: Path = args.output
     configPath: Path | None = args.config
     if configPath is None:
-        candidate = storiesDir.parent / "site.kdl"
+        candidateRoot = cliStories.parent if cliStories is not None else defaultOutput
+        candidate = candidateRoot / "site.kdl"
         if candidate.is_file():
             configPath = candidate
 
     configDoc = kdl.Document()
     configSource = "<config>"
+    configuredStories: Path | None = None
     if configPath is not None:
         configDoc = _loadKdlConfig(configPath)
         configSource = str(configPath)
+        configuredStories = _resolveStoriesPathFromConfig(configDoc, configPath)
+
+    storiesDir = cliStories if cliStories is not None else (configuredStories or defaultStories)
 
     def _strOpt(cliVal: str | None, kdlKey: str, fallback: str) -> str:
         if cliVal is not None:
@@ -357,9 +421,10 @@ def _runStamp(argv: t.Sequence[str]) -> int:
     """Execute the `ficgen stamp` subcommand."""
     parser = _stampArgParser()
     args = parser.parse_args(argv)
+    storiesDir = _resolveCliStoriesDir(args.stories, args.config)
     dateValue: str = args.date if args.date is not None else defaultTodayDate()
     result = stampStories(
-        storiesDir=args.stories,
+        storiesDir=storiesDir,
         dateValue=dateValue,
         targets=args.targets,
         force=bool(args.force),
@@ -374,8 +439,9 @@ def _runNew(argv: t.Sequence[str]) -> int:
     """Execute the `ficgen new` / `ficgen init` subcommand."""
     parser = _newArgParser()
     args = parser.parse_args(argv)
+    storiesDir = _resolveCliStoriesDir(args.stories, args.config)
     options = InitOptions(
-        storiesDir=args.stories,
+        storiesDir=storiesDir,
         title=args.title,
         slug=args.slug,
         multiChapter=bool(args.multi),
@@ -415,6 +481,7 @@ def _runImport(argv: t.Sequence[str]) -> int:
         msg = "--slug can only be used when importing a single work."
         raise StoryParseError(msg)
 
+    storiesDir = _resolveCliStoriesDir(args.stories, args.config)
     logger = logging.getLogger("ficgen.importer")
     previousFetcher = ao3fetch.getFetcher()
     installedCustom = False
@@ -438,7 +505,7 @@ def _runImport(argv: t.Sequence[str]) -> int:
     try:
         for source in args.sources:
             options = ImportOptions(
-                storiesDir=args.stories,
+                storiesDir=storiesDir,
                 archiveUrl=args.archive,
                 slug=args.slug,
                 asDraft=bool(args.draft),

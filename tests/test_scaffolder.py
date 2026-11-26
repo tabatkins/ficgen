@@ -16,7 +16,7 @@ from ficgen.scaffolder import InitOptions, initStory
 
 def test_init_single_doc_story_defaults_to_draft_and_builds_cleanly(tmp_path: Path) -> None:
     """Single-doc scaffolding creates index.md with valid KDL draft metadata."""
-    storiesDir = tmp_path / "stories"
+    storiesDir = tmp_path / "_stories"
     result = initStory(
         InitOptions(
             storiesDir=storiesDir,
@@ -56,7 +56,7 @@ def test_init_single_doc_story_defaults_to_draft_and_builds_cleanly(tmp_path: Pa
 
 def test_init_multi_chapter_story_creates_story_kdl_and_chapters(tmp_path: Path) -> None:
     """Multi-chapter scaffolding creates story.kdl and ch1.md..chN.md without index.md."""
-    storiesDir = tmp_path / "stories"
+    storiesDir = tmp_path / "_stories"
     result = initStory(
         InitOptions(
             storiesDir=storiesDir,
@@ -92,7 +92,7 @@ def test_init_multi_chapter_story_creates_story_kdl_and_chapters(tmp_path: Path)
 
 def test_init_rejects_duplicate_dir_and_bad_inputs(tmp_path: Path) -> None:
     """Scaffolding refuses to overwrite existing story directories or accept invalid slugs/counts."""
-    storiesDir = tmp_path / "stories"
+    storiesDir = tmp_path / "_stories"
     initStory(InitOptions(storiesDir=storiesDir, title="Unique Story"))
 
     with pytest.raises(StoryParseError, match="already exists"):
@@ -107,7 +107,7 @@ def test_init_rejects_duplicate_dir_and_bad_inputs(tmp_path: Path) -> None:
 
 def test_cli_new_and_init_alias(tmp_path: Path) -> None:
     """`ficgen new` and `ficgen init` work via CLI and surface errors cleanly."""
-    storiesDir = tmp_path / "stories"
+    storiesDir = tmp_path / "_stories"
     assert (
         main(
             [
