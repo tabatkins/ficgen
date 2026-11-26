@@ -26,7 +26,7 @@ pip install -r requirements-dev.txt
 
 ## 1. The `ficgen` Command
 
-`ficgen` (also runnable as `python -m ficgen`) has four subcommands: `build` (the default when no subcommand is given), `new` (alias `init`), `import`, and `stamp`.
+`ficgen` (also runnable as `python -m ficgen`) has four subcommands: `build` (the default when no subcommand is given), `new`, `import`, and `stamp`.
 
 ### Building the Archive (`ficgen` / `ficgen build`)
 
@@ -85,7 +85,7 @@ output/
 
 Rebuilding cleans stale `.html` files inside known story folders and regenerates `browse/` from scratch, while leaving `_stories/` and non-HTML files untouched. If any published story or chapter is missing an explicit `date` metadata node, `ficgen` logs a `WARNING` to `stderr` via Python's `logging` module suggesting `ficgen stamp`.
 
-### Initializing a New Story (`ficgen new` / `ficgen init`)
+### Creating a New Story (`ficgen new`)
 
 Creates a new story folder under `_stories/<slug>/` with valid KDL metadata and starter Markdown files:
 
@@ -94,7 +94,6 @@ ficgen new "Midnight Rain"                                      # one-shot: _sto
 ficgen new --multi "Starlight Drift"                            # multi-chapter: story.kdl + ch1.md (draft)
 ficgen new --chapters 3 "Long Arc"                              # multi-chapter: story.kdl + ch1.md..ch3.md
 ficgen new "Quick Shot" --published --fandom "Original Work" --category "F/F" --tag "fluff"
-ficgen init "Alias Example" --slug custom-slug                  # `init` is an alias for `new`
 ```
 
 #### New Story Options

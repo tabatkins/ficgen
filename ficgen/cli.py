@@ -90,7 +90,7 @@ def _buildArgParser(defaultStories: Path, defaultOutput: Path) -> argparse.Argum
         epilog=(
             "Subcommands:\n"
             + "  ficgen [build] [options]        Build the static HTML archive (default)\n"
-            + "  ficgen new TITLE [options]      Initialize a new story directory (alias: init)\n"
+            + "  ficgen new TITLE [options]      Initialize a new story directory\n"
             + "  ficgen import SOURCE [options]  Import stories from AO3-compatible archives or EPUBs\n"
             + "  ficgen stamp [options]          Stamp date into undated story/chapter KDL metadata blocks"
         ),
@@ -201,7 +201,7 @@ def _stampArgParser() -> argparse.ArgumentParser:
 
 
 def _newArgParser() -> argparse.ArgumentParser:
-    """Create the CLI argument parser for the `new` / `init` subcommand."""
+    """Create the CLI argument parser for the `new` subcommand."""
     defaultStories, _ = _resolveDefaultPaths()
     parser = argparse.ArgumentParser(
         prog="ficgen new",
@@ -436,7 +436,7 @@ def _runStamp(argv: t.Sequence[str]) -> int:
 
 
 def _runNew(argv: t.Sequence[str]) -> int:
-    """Execute the `ficgen new` / `ficgen init` subcommand."""
+    """Execute the `ficgen new` subcommand."""
     parser = _newArgParser()
     args = parser.parse_args(argv)
     storiesDir = _resolveCliStoriesDir(args.stories, args.config)
@@ -544,7 +544,7 @@ def main(argv: t.Sequence[str] | None = None) -> int:
     try:
         if rawArgs and rawArgs[0] == "stamp":
             return _runStamp(rawArgs[1:])
-        if rawArgs and rawArgs[0] in {"new", "init"}:
+        if rawArgs and rawArgs[0] == "new":
             return _runNew(rawArgs[1:])
         if rawArgs and rawArgs[0] == "import":
             return _runImport(rawArgs[1:])

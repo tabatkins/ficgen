@@ -1,4 +1,4 @@
-"""Tests for the `ficgen new` / `ficgen init` story scaffolder."""
+"""Tests for the `ficgen new` story scaffolder."""
 
 from __future__ import annotations
 
@@ -105,8 +105,8 @@ def test_init_rejects_duplicate_dir_and_bad_inputs(tmp_path: Path) -> None:
         initStory(InitOptions(storiesDir=storiesDir, title="Zero", chapterCount=0))
 
 
-def test_cli_new_and_init_alias(tmp_path: Path) -> None:
-    """`ficgen new` and `ficgen init` work via CLI and surface errors cleanly."""
+def test_cli_new(tmp_path: Path) -> None:
+    """`ficgen new` works via CLI and surfaces errors cleanly."""
     storiesDir = tmp_path / "_stories"
     assert (
         main(
@@ -129,7 +129,7 @@ def test_cli_new_and_init_alias(tmp_path: Path) -> None:
     assert (
         main(
             [
-                "init",
+                "new",
                 "CLI Multi",
                 "--slug",
                 "custom-multi",
