@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en"{% if archive.config.hideNsfw %} data-nsfw-hide="1"{% endif %}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -24,6 +24,22 @@
       } catch {}
     })();
   </script>
+  {% if archive.config.hideNsfw %}
+  <script>
+    (() => {
+      const root = document.documentElement;
+      root.dataset.nsfwJs = "1";
+      const match = document.cookie.match(/(?:^|;\s*)ficgen_nsfw_site=([^;]*)/);
+      let allowSite = Boolean(match && decodeURIComponent(match[1]) === "1");
+      {% if archive.config.localBrowsing %}
+      if (!allowSite && location.protocol === "file:") {
+        try { allowSite = localStorage.getItem("ficgen_nsfw_site") === "1"; } catch {}
+      }
+      {% endif %}
+      if (allowSite) root.dataset.nsfwSite = "allow";
+    })();
+  </script>
+  {% endif %}
 </head>
 <body class="{{ bodyClass }}">
   <a class="skip-link" href="#content">Skip to content</a>
@@ -50,7 +66,7 @@
       <p>
         <a href="{{ rootPrefix or './' }}">Stories</a> &middot;
         <a href="{{ rootPrefix }}browse/">Browse Tags</a> &middot;
-        <a href="{{ rootPrefix }}feed.xml">Atom Feed</a>
+        <a href="{{ rootPrefix }}feed.xml">Atom Feed</a>{% if archive.config.hideNsfw %}<span id="nsfw-reset-sep" hidden> &middot; </span><button type="button" class="nsfw-reset" id="nsfw-reset" hidden>Re-hide NSFW</button>{% endif %}
       </p>
     </div>
   </footer>
@@ -77,6 +93,175 @@
       });
     })();
   </script>
+  {% if archive.config.hideNsfw %}
+  <script>
+    (() => {
+      const SITE_KEY = "ficgen_nsfw_site";
+      const ALLOW_KEY = "ficgen_nsfw_allow";
+      const root = document.documentElement;
+      {% if archive.config.localBrowsing %}
+      const isFile = location.protocol === "file:";
+      const cookiePath = isFile ? "/" : new URL("{{ rootPrefix or './' }}", location.href).pathname;
+      {% else %}
+      const isFile = false;
+      const cookiePath = new URL("{{ rootPrefix or './' }}", location.href).pathname;
+      {% endif %}
+
+      const readCookie = (name) => {
+        const prefix = name + "=";
+        for (const part of document.cookie.split(";")) {
+          const trimmed = part.trim();
+          if (trimmed.startsWith(prefix)) return decodeURIComponent(trimmed.slice(prefix.length));
+        }
+        return "";
+      };
+
+      const readPref = (name) => {
+        const val = readCookie(name);
+        if (val || !isFile) return val;
+        try { return localStorage.getItem(name) || ""; } catch { return ""; }
+      };
+
+      const writePref = (name, value) => {
+        document.cookie = name + "=" + encodeURIComponent(value) + "; path=" + cookiePath + "; max-age=31536000; SameSite=Lax";
+        if (isFile) {
+          try { localStorage.setItem(name, value); } catch {}
+        }
+      };
+
+      const clearPref = (name) => {
+        document.cookie = name + "=; path=" + cookiePath + "; max-age=0; SameSite=Lax";
+        if (isFile) {
+          try { localStorage.removeItem(name); } catch {}
+        }
+      };
+
+      let siteAllowed = readPref(SITE_KEY) === "1";
+      const allowSet = new Set(readPref(ALLOW_KEY).split(",").filter(Boolean));
+      const resetBtn = document.getElementById("nsfw-reset");
+      const resetSep = document.getElementById("nsfw-reset-sep");
+
+      const allGates = Array.from(document.querySelectorAll(".nsfw-gate"));
+      const gates = [];
+      for (const gate of allGates) {
+        if (gate.parentElement && gate.parentElement.closest(".nsfw-gate")) {
+          gate.dataset.nsfwRevealed = "1";
+        } else {
+          gates.push(gate);
+        }
+      }
+
+      const gateScope = (gate) => {
+        const kind = gate.dataset.nsfwGate || "section";
+        const work = gate.dataset.nsfwWork || gate.closest("[data-nsfw-work]")?.dataset.nsfwWork || "";
+        const chapter = gate.dataset.nsfwChapter || gate.closest("[data-nsfw-chapter]")?.dataset.nsfwChapter || "";
+        return { kind, work, chapter };
+      };
+
+      const isAllowed = (gate) => {
+        if (siteAllowed) return true;
+        const { work, chapter } = gateScope(gate);
+        if (work && allowSet.has("work:" + work)) return true;
+        if (chapter && allowSet.has("chapter:" + chapter)) return true;
+        return false;
+      };
+
+      const permanentChoice = (gate) => {
+        const { kind, work, chapter } = gateScope(gate);
+        if (kind === "work" && work) return { key: "work:" + work, label: "Always show this work" };
+        if (kind === "chapter" && chapter) return { key: "chapter:" + chapter, label: "Always show this chapter" };
+        if (chapter) return { key: "chapter:" + chapter, label: "Always show for this chapter" };
+        if (work) return { key: "work:" + work, label: "Always show for this work" };
+        return { key: "", label: "" };
+      };
+
+      const makeButton = (label, primary, onClick) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = primary ? "btn btn-primary" : "btn";
+        btn.textContent = label;
+        btn.addEventListener("click", onClick);
+        return btn;
+      };
+
+      const buildDialog = (gate) => {
+        const { kind } = gateScope(gate);
+        const reason = gate.dataset.nsfwReason || "";
+        const titleMap = { work: "NSFW Work", chapter: "NSFW Chapter", section: "NSFW Section" };
+        const dlg = document.createElement("dialog");
+        dlg.open = true;
+        dlg.className = "nsfw-dialog";
+        dlg.dataset.nsfwUi = "";
+        dlg.setAttribute("aria-label", titleMap[kind] || "NSFW Content");
+
+        const heading = document.createElement("p");
+        heading.className = "nsfw-dialog-title";
+        heading.textContent = titleMap[kind] || "NSFW Content";
+        dlg.appendChild(heading);
+
+        const msg = document.createElement("p");
+        msg.className = "nsfw-dialog-message";
+        msg.textContent = "This " + kind + " contains NSFW content" + (reason ? " (" + reason + ")" : "") + ". Would you like to display it?";
+        dlg.appendChild(msg);
+
+        const actions = document.createElement("div");
+        actions.className = "nsfw-dialog-actions";
+        actions.appendChild(makeButton("Show once", true, () => {
+          gate.dataset.nsfwRevealed = "1";
+          dlg.remove();
+        }));
+
+        const choice = permanentChoice(gate);
+        if (choice.key) {
+          actions.appendChild(makeButton(choice.label, false, () => {
+            allowSet.add(choice.key);
+            writePref(ALLOW_KEY, Array.from(allowSet).join(","));
+            sync();
+          }));
+        }
+
+        actions.appendChild(makeButton("Always show NSFW on this site", false, () => {
+          siteAllowed = true;
+          root.dataset.nsfwSite = "allow";
+          writePref(SITE_KEY, "1");
+          sync();
+        }));
+
+        dlg.appendChild(actions);
+        return dlg;
+      };
+
+      const sync = () => {
+        for (const gate of gates) {
+          const existing = gate.querySelector(":scope > .nsfw-dialog");
+          if (isAllowed(gate)) {
+            gate.dataset.nsfwRevealed = "1";
+            if (existing) existing.remove();
+          } else if (gate.dataset.nsfwRevealed !== "1" && !existing) {
+            gate.insertBefore(buildDialog(gate), gate.firstChild);
+          }
+        }
+        const hasPrefs = siteAllowed || allowSet.size > 0;
+        if (resetBtn) resetBtn.hidden = !hasPrefs;
+        if (resetSep) resetSep.hidden = !hasPrefs;
+      };
+
+      if (resetBtn) {
+        resetBtn.addEventListener("click", () => {
+          clearPref(SITE_KEY);
+          clearPref(ALLOW_KEY);
+          siteAllowed = false;
+          allowSet.clear();
+          delete root.dataset.nsfwSite;
+          for (const gate of gates) delete gate.dataset.nsfwRevealed;
+          sync();
+        });
+      }
+
+      sync();
+    })();
+  </script>
+  {% endif %}
   {% if archive.config.localBrowsing %}
   <script>
     if (location.protocol === "file:") {

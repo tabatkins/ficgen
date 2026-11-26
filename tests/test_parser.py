@@ -239,3 +239,75 @@ def test_case_insensitive_taxonomy_tags_remain_visible_on_all_stories(tmp_path: 
     secondItems = archive.taxonomyItems(bySlug["second"], "tags")
     assert len(firstItems) == 1 and firstItems[0].slug == "slow-burn"
     assert len(secondItems) == 1 and secondItems[0].slug == "slow-burn"
+
+
+def test_nsfw_metadata_on_work_chapter_and_section(tmp_path: Path) -> None:
+    """Parser reads work-level, chapter-level, and section-level NSFW markers accurately."""
+    # Single-doc NSFW with explicit reason string.
+    oneShotNsfw = tmp_path / "spicy-shot"
+    oneShotNsfw.mkdir()
+    (oneShotNsfw / "index.md").write_text(
+        '# Spicy Shot\n\n```metadata\nnsfw "Explicit sexual content"\ndate "2026-10-01"\n```\n\nBody.\n',
+        encoding="utf-8",
+    )
+
+    # Single-doc SFW containing an <nsfw> section.
+    oneShotSection = tmp_path / "partial-shot"
+    oneShotSection.mkdir()
+    (oneShotSection / "index.md").write_text(
+        '# Partial Shot\n\n```metadata\ndate "2026-10-02"\n```\n\nSafe.\n\n<nsfw>\nSpicy scene.\n</nsfw>\n',
+        encoding="utf-8",
+    )
+
+    # Multi-chapter SFW story with one NSFW chapter (using reason property).
+    multiChapter = tmp_path / "mixed-multi"
+    multiChapter.mkdir()
+    (multiChapter / "story.kdl").write_text('title "Mixed Multi"\n', encoding="utf-8")
+    (multiChapter / "ch1.md").write_text(
+        '```metadata\nchapter 1\ndate "2026-10-03"\n```\n\nSafe ch1.\n',
+        encoding="utf-8",
+    )
+    (multiChapter / "ch2.md").write_text(
+        '```metadata\nchapter 2\nnsfw true reason="Violence"\ndate "2026-10-04"\n```\n\nCh2.\n',
+        encoding="utf-8",
+    )
+
+    # Legacy multi-chapter without story.kdl: nsfw on ch1 stays on ch1, not whole work.
+    legacy = tmp_path / "legacy-nsfw"
+    legacy.mkdir()
+    (legacy / "ch1.md").write_text(
+        '```metadata\nchapter 1\nnsfw true\ndate "2026-10-05"\n```\n\nCh1.\n',
+        encoding="utf-8",
+    )
+    (legacy / "ch2.md").write_text('```metadata\nchapter 2\ndate "2026-10-06"\n```\n\nCh2.\n', encoding="utf-8")
+
+    archive = loadArchive(SiteConfig(storiesDir=tmp_path, outputDir=tmp_path / "out"))
+    bySlug = {story.slug: story for story in archive.stories}
+
+    assert bySlug["spicy-shot"].nsfw is True
+    assert bySlug["spicy-shot"].nsfwReason == "Explicit sexual content"
+    assert bySlug["spicy-shot"].hasNsfwContent is True
+
+    assert bySlug["partial-shot"].nsfw is False
+    assert bySlug["partial-shot"].hasNsfwSections is True
+    assert bySlug["partial-shot"].hasNsfwContent is True
+
+    mixed = bySlug["mixed-multi"]
+    assert mixed.nsfw is False
+    assert mixed.hasNsfwChapters is True
+    assert mixed.hasNsfwContent is True
+    assert mixed.chapters[0].nsfw is False
+    assert mixed.chapters[1].nsfw is True
+    assert mixed.chapters[1].nsfwReason == "Violence"
+
+    leg = bySlug["legacy-nsfw"]
+    assert leg.nsfw is False
+    assert leg.chapters[0].nsfw is True
+    assert leg.chapters[1].nsfw is False
+
+    # Non-bool/non-string nsfw value raises StoryParseError.
+    bad = tmp_path / "bad-nsfw"
+    bad.mkdir()
+    (bad / "index.md").write_text("# Bad\n\n```metadata\nnsfw 123\n```\n\nBody.\n", encoding="utf-8")
+    with pytest.raises(StoryParseError, match="nsfw"):
+        loadArchive(SiteConfig(storiesDir=tmp_path, outputDir=tmp_path / "out"))

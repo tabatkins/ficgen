@@ -11,7 +11,7 @@ from pathlib import Path
 import ao3fetch
 
 from . import t
-from .config import loadSiteConfig, resolveDefaultPaths, resolveStoriesDir
+from .config import loadSiteConfig, resolveDefaultPaths, resolveImportSettings, resolveStoriesDir
 from .generator import BuildResult, generateSite
 from .importer import ImportOptions, importFromSource
 from .kdlMeta import StoryParseError
@@ -189,6 +189,12 @@ def _newArgParser() -> argparse.ArgumentParser:
         help="Mark starter file(s) as published (default creates them as `published false` drafts).",
     )
     parser.add_argument(
+        "--nsfw",
+        action="store_true",
+        default=False,
+        help="Mark the new story as NSFW (`nsfw true`).",
+    )
+    parser.add_argument(
         "--date",
         type=str,
         default="",
@@ -343,6 +349,7 @@ def _runNew(argv: t.Sequence[str]) -> int:
         multiChapter=bool(args.multi),
         chapterCount=int(args.chapters),
         published=bool(args.published),
+        nsfw=bool(args.nsfw),
         dateValue=args.date,
         fandoms=tuple(args.fandom),
         categories=tuple(args.category),
@@ -416,7 +423,7 @@ def _runImport(argv: t.Sequence[str]) -> int:
         msg = "--slug can only be used when importing a single work."
         raise StoryParseError(msg)
 
-    storiesDir = resolveStoriesDir(args.stories, args.config)
+    storiesDir, importNsfw = resolveImportSettings(args.stories, args.config)
     with _configuredAo3Fetcher(args.cookie):
         for source in args.sources:
             options = ImportOptions(
@@ -425,6 +432,7 @@ def _runImport(argv: t.Sequence[str]) -> int:
                 slug=args.slug,
                 asDraft=bool(args.draft),
                 force=bool(args.force),
+                nsfwConfig=importNsfw,
             )
             result = importFromSource(source, options)
             chapterNote = f" ({result.chapterCount} chapters)" if result.chapterCount > 1 else ""

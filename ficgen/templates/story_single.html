@@ -1,14 +1,16 @@
 {% extends "base.html" %}
 {% block content %}
+{% set isGated = story.nsfw and archive.config.hideNsfw %}
 <nav class="breadcrumb" aria-label="Breadcrumb">
   <a href="{{ rootPrefix }}">&larr; All Stories</a>
 </nav>
 
-<article class="work">
+<article class="work" data-nsfw-work="{{ story.slug }}">
   <header class="work-header">
     <h1>
       {{ story.title }}
       {% if not story.published %}<span class="badge badge-draft">Draft</span>{% endif %}
+      {% if story.nsfw %}<span class="badge badge-nsfw">NSFW</span>{% elif story.hasNsfwSections %}<span class="badge badge-nsfw">Contains NSFW</span>{% endif %}
     </h1>
     {% if story.author %}
     <p class="work-byline">by {{ story.author }}</p>
@@ -23,18 +25,41 @@
     </section>
     {% endif %}
 
-    {% if story.notesHtml %}
-    <aside class="author-notes" aria-labelledby="notes-heading">
-      <h2 id="notes-heading">Notes</h2>
-      {{ story.notesHtml | safe }}
-      {% if story.endnotesHtml %}
-      <p class="endnotes-pointer">See the <a href="#endnotes">end of the story</a> for more notes.</p>
+    {% if not isGated %}
+      {% if story.notesHtml %}
+      <aside class="author-notes" aria-labelledby="notes-heading">
+        <h2 id="notes-heading">Notes</h2>
+        {{ story.notesHtml | safe }}
+        {% if story.endnotesHtml %}
+        <p class="endnotes-pointer">See the <a href="#endnotes">end of the story</a> for more notes.</p>
+        {% endif %}
+      </aside>
+      {% elif story.endnotesHtml %}
+      <p class="endnotes-pointer">See the <a href="#endnotes">end of the story</a> for notes.</p>
       {% endif %}
-    </aside>
-    {% elif story.endnotesHtml %}
-    <p class="endnotes-pointer">See the <a href="#endnotes">end of the story</a> for notes.</p>
     {% endif %}
   </header>
+
+  {% if isGated %}
+  <div class="nsfw-gate" data-nsfw-gate="work" data-nsfw-work="{{ story.slug }}"{% if story.nsfwReason %} data-nsfw-reason="{{ story.nsfwReason }}"{% endif %}>
+    <noscript>
+      <aside class="nsfw-warning" role="note">
+        <strong>NSFW Warning:</strong> This work contains NSFW content{% if story.nsfwReason %} ({{ story.nsfwReason }}){% endif %}.
+      </aside>
+    </noscript>
+    <div class="nsfw-content">
+      {% if story.notesHtml %}
+      <aside class="author-notes" aria-labelledby="notes-heading">
+        <h2 id="notes-heading">Notes</h2>
+        {{ story.notesHtml | safe }}
+        {% if story.endnotesHtml %}
+        <p class="endnotes-pointer">See the <a href="#endnotes">end of the story</a> for more notes.</p>
+        {% endif %}
+      </aside>
+      {% elif story.endnotesHtml %}
+      <p class="endnotes-pointer">See the <a href="#endnotes">end of the story</a> for notes.</p>
+      {% endif %}
+  {% endif %}
 
   <div class="prose">
     {{ story.bodyHtml | safe }}
@@ -45,6 +70,11 @@
     <h2 id="endnotes-heading">End Notes</h2>
     {{ story.endnotesHtml | safe }}
   </aside>
+  {% endif %}
+
+  {% if isGated %}
+    </div>
+  </div>
   {% endif %}
 </article>
 

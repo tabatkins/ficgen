@@ -857,3 +857,118 @@ def test_css_scanners_handle_comments_at_keyword_boundaries_and_layer_overrides(
         resolveFontStack("var(--font-serif", role="serif")
     with pytest.raises(StoryParseError, match="unmatched '\\)'"):
         resolveFontStack("Georgia), serif", role="serif")
+
+
+def test_nsfw_gating_noscript_warnings_and_site_kdl_display_toggle(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Hidden NSFW works/chapters/sections show in listings, gate content with cookie dialog & noscript warning, and toggle via site.kdl."""
+    storiesDir = tmp_path / "_stories"
+
+    # Whole-work NSFW one-shot.
+    oneShot = storiesDir / "after-dark"
+    oneShot.mkdir(parents=True)
+    (oneShot / "index.md").write_text(
+        "# After Dark\n\n"
+        + '```metadata\nfandoms "Original Work"\nnsfw "Explicit content"\ndate "2026-10-01"\n```\n\n'
+        + "<summary>\nSafe public summary.\n</summary>\n\n"
+        + "Spicy one-shot prose.\n",
+        encoding="utf-8",
+    )
+
+    # SFW multi-chapter with an inline <nsfw> section in ch1 and an NSFW ch2.
+    mixed = storiesDir / "day-and-night"
+    mixed.mkdir(parents=True)
+    (mixed / "story.kdl").write_text('title "Day and Night"\nfandoms "Original Work"\n', encoding="utf-8")
+    (mixed / "ch1.md").write_text(
+        '# Morning\n\n```metadata\nchapter 1\ndate "2026-10-02"\n```\n\n'
+        + "Safe opening.\n\n<nsfw>\nBrief spicy scene.\n</nsfw>\n",
+        encoding="utf-8",
+    )
+    (mixed / "ch2.md").write_text(
+        '# Midnight\n\n```metadata\nchapter 2\nnsfw true\ndate "2026-10-03"\n```\n\nFull NSFW chapter prose.\n',
+        encoding="utf-8",
+    )
+
+    # Whole-work NSFW multi-chapter.
+    allNsfw = storiesDir / "velvet-sky"
+    allNsfw.mkdir(parents=True)
+    (allNsfw / "story.kdl").write_text('title "Velvet Sky"\nnsfw true\n', encoding="utf-8")
+    (allNsfw / "ch1.md").write_text('```metadata\nchapter 1\ndate "2026-10-04"\n```\n\nVelvet ch1.\n', encoding="utf-8")
+
+    # Default build hides NSFW behind confirmation dialog + noscript warning.
+    outHidden = tmp_path / "out-hidden"
+    assert main(["build", "--stories", str(storiesDir), "--output", str(outHidden)]) == 0
+    _assertAllInternalLinksResolve(outHidden)
+
+    # Listings show NSFW works normally with NSFW / Contains NSFW badges.
+    indexHtml = (outHidden / "index.html").read_text(encoding="utf-8")
+    assert "After Dark" in indexHtml
+    assert "Safe public summary." in indexHtml
+    assert '<span class="badge badge-nsfw">NSFW</span>' in indexHtml
+    assert '<span class="badge badge-nsfw">Contains NSFW</span>' in indexHtml
+    assert 'data-nsfw-hide="1"' in indexHtml
+
+    # NSFW one-shot gates content behind work-level dialog + noscript warning + cookie persistence.
+    oneShotHtml = (outHidden / "after-dark" / "index.html").read_text(encoding="utf-8")
+    assert 'data-nsfw-gate="work"' in oneShotHtml
+    assert 'data-nsfw-work="after-dark"' in oneShotHtml
+    assert 'data-nsfw-reason="Explicit content"' in oneShotHtml
+    assert "<noscript>" in oneShotHtml
+    assert "NSFW Warning:" in oneShotHtml
+    assert "ficgen_nsfw_site" in oneShotHtml
+    assert "ficgen_nsfw_allow" in oneShotHtml
+    assert "Always show this work" in oneShotHtml
+    assert "Always show NSFW on this site" in oneShotHtml
+    assert "Re-hide NSFW" in oneShotHtml
+    assert "Spicy one-shot prose." in oneShotHtml
+
+    # SFW multi-chapter: ch1 has section gate only; ch2 has chapter gate; all.html gates ch2 only.
+    ch1Html = (outHidden / "day-and-night" / "ch1.html").read_text(encoding="utf-8")
+    assert 'data-nsfw-gate="chapter"' not in ch1Html
+    assert 'data-nsfw-gate="section"' in ch1Html
+    assert "<noscript>" in ch1Html
+
+    ch2Html = (outHidden / "day-and-night" / "ch2.html").read_text(encoding="utf-8")
+    assert 'data-nsfw-gate="chapter"' in ch2Html
+    assert 'data-nsfw-chapter="day-and-night/ch2"' in ch2Html
+    assert "This chapter contains NSFW content" in ch2Html
+
+    allMixedHtml = (outHidden / "day-and-night" / "all.html").read_text(encoding="utf-8")
+    assert 'data-nsfw-gate="work"' not in allMixedHtml
+    assert 'data-nsfw-gate="chapter"' in allMixedHtml
+    assert 'data-nsfw-gate="section"' in allMixedHtml
+
+    # Whole-work NSFW multi-chapter uses a single work-level gate on ch1 and all.html.
+    velvetCh1 = (outHidden / "velvet-sky" / "ch1.html").read_text(encoding="utf-8")
+    assert 'data-nsfw-gate="work"' in velvetCh1
+    velvetAll = (outHidden / "velvet-sky" / "all.html").read_text(encoding="utf-8")
+    assert velvetAll.count('data-nsfw-gate="work"') == 1
+    assert 'data-nsfw-gate="chapter"' not in velvetAll
+
+    # Setting `hide-nsfw false` (or `nsfw "show"`) displays all NSFW content normally without gating.
+    cfgPath = tmp_path / "site.kdl"
+    cfgPath.write_text("hide-nsfw false\n", encoding="utf-8")
+    assert buildConfigFromArgs(["--stories", str(storiesDir), "--config", str(cfgPath)]).hideNsfw is False
+
+    cfgPath.write_text('nsfw "show"\n', encoding="utf-8")
+    outShown = tmp_path / "out-shown"
+    assert main(["build", "--stories", str(storiesDir), "--output", str(outShown), "--config", str(cfgPath)]) == 0
+    shownOneShot = (outShown / "after-dark" / "index.html").read_text(encoding="utf-8")
+    assert 'data-nsfw-hide="1"' not in shownOneShot
+    assert "data-nsfw-gate" not in shownOneShot
+    assert "<noscript>" not in shownOneShot
+    assert "ficgen_nsfw_site" not in shownOneShot
+    assert "Spicy one-shot prose." in shownOneShot
+    assert '<span class="badge badge-nsfw">NSFW</span>' in shownOneShot
+
+    shownCh1 = (outShown / "day-and-night" / "ch1.html").read_text(encoding="utf-8")
+    assert '<section class="nsfw-section">' in shownCh1
+    assert "data-nsfw-gate" not in shownCh1
+    assert "<noscript>" not in shownCh1
+
+    # Invalid display mode fails cleanly.
+    cfgPath.write_text('nsfw "bogus"\n', encoding="utf-8")
+    assert main(["build", "--stories", str(storiesDir), "--output", str(outShown), "--config", str(cfgPath)]) == 1
+    assert "Invalid NSFW display mode" in capsys.readouterr().err

@@ -12,7 +12,7 @@
         {% for item in story.chapters %}
         <li>
           <a href="{{ item.filename }}"{% if item.number == chapter.number %} aria-current="page"{% endif %}>
-            <span>{{ item.displayTitle }}{% if not item.published %} [Draft]{% endif %}</span>
+            <span>{{ item.displayTitle }}{% if not item.published %} [Draft]{% endif %}{% if item.nsfw %} [NSFW]{% endif %}</span>
             <span class="browse-count">{{ item.wordCount | format_num }}w</span>
           </a>
         </li>

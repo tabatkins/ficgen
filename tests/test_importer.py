@@ -347,3 +347,174 @@ def test_import_handles_missing_and_corrupt_epub_and_cookie_header_join(
     assert mergeCookieHeader("view_adult=true", "session=abc123") == "view_adult=true; session=abc123"
     assert mergeCookieHeader("view_adult=true;", "session=abc123") == "view_adult=true; session=abc123"
     assert mergeCookieHeader("", "session=abc123") == "session=abc123"
+
+
+def _makeWorkHtml(
+    *,
+    title: str,
+    rating: str,
+    warning: str = "No Archive Warnings Apply",
+    freeformTags: tuple[str, ...] = (),
+) -> str:
+    tagItems = "".join(f'<li><a class="tag">{tag}</a></li>' for tag in freeformTags)
+    freeformBlock = f'<dd class="freeform tags"><ul class="commas">{tagItems}</ul></dd>' if freeformTags else ""
+    return (
+        "<!DOCTYPE html><html><body><div id='workskin'>"
+        + f'<div class="preface group"><h2 class="title heading">{title}</h2>'
+        + '<h3 class="byline heading"><a rel="author" href="/users/a/pseuds/a">a</a></h3></div>'
+        + '<dl class="work meta group">'
+        + f'<dd class="rating tags"><a class="tag">{rating}</a></dd>'
+        + f'<dd class="warning tags"><a class="tag">{warning}</a></dd>'
+        + '<dd class="category tags"><a class="tag">F/F</a></dd>'
+        + '<dd class="fandom tags"><a class="tag">Original Work</a></dd>'
+        + freeformBlock
+        + '<dd class="language">English</dd>'
+        + '<dd class="stats"><dl class="stats"><dd class="published">2026-03-01</dd>'
+        + '<dd class="words">100</dd><dd class="chapters">1/1</dd></dl></dd></dl>'
+        + '<div id="chapters"><div class="userstuff module" role="article"><p>Prose.</p></div></div>'
+        + "</div></body></html>"
+    )
+
+
+_WORK_CHAPTER_NSFW_HTML = """<!DOCTYPE html>
+<html><body>
+<div id="workskin">
+  <div class="preface group">
+    <h2 class="title heading">Mixed Chapters</h2>
+    <h3 class="byline heading"><a rel="author" href="/users/a/pseuds/a">a</a></h3>
+  </div>
+  <dl class="work meta group">
+    <dd class="rating tags"><a class="tag">Teen And Up Audiences</a></dd>
+    <dd class="warning tags"><a class="tag">No Archive Warnings Apply</a></dd>
+    <dd class="category tags"><a class="tag">F/F</a></dd>
+    <dd class="fandom tags"><a class="tag">Original Work</a></dd>
+    <dd class="language">English</dd>
+    <dd class="stats"><dl class="stats">
+      <dd class="published">2026-04-01</dd>
+      <dd class="words">500</dd>
+      <dd class="chapters">2/2</dd>
+    </dl></dd>
+  </dl>
+  <div id="chapters">
+    <div class="chapter" id="chapter-1">
+      <div class="chapter preface group">
+        <h3 class="title"><a href="/works/800/chapters/1">Chapter 1</a>: Calm</h3>
+        <div id="notes" class="notes module"><blockquote class="userstuff"><p>No NSFW in this chapter.</p></blockquote></div>
+      </div>
+      <div class="userstuff module" role="article"><p>Safe chapter.</p></div>
+    </div>
+    <div class="chapter" id="chapter-2">
+      <div class="chapter preface group">
+        <h3 class="title"><a href="/works/800/chapters/2">Chapter 2</a>: Heat</h3>
+        <div id="notes" class="notes module"><blockquote class="userstuff"><p>Warning: NSFW scene ahead.</p></blockquote></div>
+      </div>
+      <div class="userstuff module" role="article"><p>Spicy chapter.</p></div>
+    </div>
+  </div>
+</div>
+</body></html>
+"""
+
+
+def test_import_nsfw_detection_defaults_and_site_kdl_customization(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`ficgen import` detects NSFW ratings, warnings, tags, and chapters by default and honors `import-nsfw` in site.kdl."""
+    routes = {
+        "https://archiveofourown.org/works/101?view_full_work=true&view_adult=true": (
+            200,
+            _makeWorkHtml(title="Explicit Work", rating="Explicit"),
+        ),
+        "https://archiveofourown.org/works/102?view_full_work=true&view_adult=true": (
+            200,
+            _makeWorkHtml(title="Mature Work", rating="Mature"),
+        ),
+        "https://archiveofourown.org/works/103?view_full_work=true&view_adult=true": (
+            200,
+            _makeWorkHtml(title="Unrated Work", rating="Not Rated"),
+        ),
+        "https://archiveofourown.org/works/104?view_full_work=true&view_adult=true": (
+            200,
+            _makeWorkHtml(
+                title="Violent Teen Work",
+                rating="Teen And Up Audiences",
+                warning="Graphic Depictions Of Violence",
+            ),
+        ),
+        "https://archiveofourown.org/works/105?view_full_work=true&view_adult=true": (
+            200,
+            _makeWorkHtml(title="Tagged Smut", rating="General Audiences", freeformTags=("Fluff and Smut",)),
+        ),
+        "https://archiveofourown.org/works/106?view_full_work=true&view_adult=true": (
+            200,
+            _makeWorkHtml(title="Negated Tag", rating="General Audiences", freeformTags=("No Smut", "Not NSFW")),
+        ),
+        "https://archiveofourown.org/works/800?view_full_work=true&view_adult=true": (200, _WORK_CHAPTER_NSFW_HTML),
+        "https://archiveofourown.org/works/800/navigate": (404, "Not Found"),
+    }
+
+    defaultStories = tmp_path / "default" / "_stories"
+    ao3fetch.setFetcher(_makeRouteFetcher(routes))
+    try:
+        for workId in ("101", "102", "103", "104", "105", "106", "800"):
+            assert main(["import", workId, "--stories", str(defaultStories)]) == 0
+    finally:
+        ao3fetch.resetFetcher()
+        ao3fetch.resetArchiveBaseUrl()
+
+    assert "nsfw true" in (defaultStories / "explicit-work" / "index.md").read_text(encoding="utf-8")
+    assert "nsfw true" in (defaultStories / "mature-work" / "index.md").read_text(encoding="utf-8")
+    assert "nsfw true" in (defaultStories / "unrated-work" / "index.md").read_text(encoding="utf-8")
+    assert "nsfw true" in (defaultStories / "violent-teen-work" / "index.md").read_text(encoding="utf-8")
+    assert "nsfw true" in (defaultStories / "tagged-smut" / "index.md").read_text(encoding="utf-8")
+    assert "nsfw true" not in (defaultStories / "negated-tag" / "index.md").read_text(encoding="utf-8")
+
+    # Multi-chapter SFW work only marks chapter 2 (not story.kdl and not chapter 1 with "No NSFW").
+    assert "nsfw true" not in (defaultStories / "mixed-chapters" / "story.kdl").read_text(encoding="utf-8")
+    assert "nsfw true" not in (defaultStories / "mixed-chapters" / "ch1.md").read_text(encoding="utf-8")
+    assert "nsfw true" in (defaultStories / "mixed-chapters" / "ch2.md").read_text(encoding="utf-8")
+
+    # Narrow `import-nsfw` in site.kdl: only Explicit ratings trigger NSFW.
+    customSite = tmp_path / "custom"
+    customSite.mkdir()
+    cfgPath = customSite / "site.kdl"
+    cfgPath.write_text(
+        "import-nsfw {\n"
+        + '    ratings "Explicit"\n'
+        + "    warnings false\n"
+        + "    tags false\n"
+        + "    chapters false\n"
+        + "}\n",
+        encoding="utf-8",
+    )
+    customStories = customSite / "_stories"
+    ao3fetch.setFetcher(_makeRouteFetcher(routes))
+    try:
+        for workId in ("101", "102", "103", "104", "105", "800"):
+            assert main(["import", workId, "--stories", str(customStories), "--config", str(cfgPath)]) == 0
+    finally:
+        ao3fetch.resetFetcher()
+        ao3fetch.resetArchiveBaseUrl()
+
+    assert "nsfw true" in (customStories / "explicit-work" / "index.md").read_text(encoding="utf-8")
+    assert "nsfw true" not in (customStories / "mature-work" / "index.md").read_text(encoding="utf-8")
+    assert "nsfw true" not in (customStories / "unrated-work" / "index.md").read_text(encoding="utf-8")
+    assert "nsfw true" not in (customStories / "violent-teen-work" / "index.md").read_text(encoding="utf-8")
+    assert "nsfw true" not in (customStories / "tagged-smut" / "index.md").read_text(encoding="utf-8")
+    assert "nsfw true" not in (customStories / "mixed-chapters" / "ch2.md").read_text(encoding="utf-8")
+
+    # `import-nsfw false` disables all automatic NSFW marking.
+    cfgPath.write_text("import-nsfw false\n", encoding="utf-8")
+    ao3fetch.setFetcher(_makeRouteFetcher(routes))
+    try:
+        assert main(["import", "101", "--stories", str(customStories), "--config", str(cfgPath), "--force"]) == 0
+    finally:
+        ao3fetch.resetFetcher()
+        ao3fetch.resetArchiveBaseUrl()
+    assert "nsfw true" not in (customStories / "explicit-work" / "index.md").read_text(encoding="utf-8")
+
+    # Invalid rating name in import-nsfw fails cleanly.
+    cfgPath.write_text('import-nsfw {\n    ratings "Bogus Rating"\n}\n', encoding="utf-8")
+    assert main(["import", "101", "--stories", str(customStories), "--config", str(cfgPath)]) == 1
+    assert "Unknown AO3 ratings value" in capsys.readouterr().err

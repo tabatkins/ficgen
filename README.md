@@ -30,7 +30,7 @@ pip install -r requirements-dev.txt
 
 ### Initializing a New Archive (`ficgen init`)
 
-Scaffolds a brand-new archive in an empty directory (defaulting to the current directory) with a starter `site.kdl` and example one-shot and multi-chapter stories under `_stories/`:
+Scaffolds a brand-new archive in an empty directory (defaulting to the current directory) with a starter `site.kdl` and example one-shot, multi-chapter, and NSFW stories under `_stories/`:
 
 ```sh
 ficgen init                     # initialize the current empty directory
@@ -73,6 +73,13 @@ base-url "https://example.com/fic/"
 // stories "_stories"
 // include-drafts false
 // local-browsing true
+// hide-nsfw true
+// import-nsfw {
+//     ratings "Explicit" "Mature" "Not Rated"
+//     warnings "Rape/Non-Con" "Underage Sex" "Graphic Depictions Of Violence"
+//     tags true
+//     chapters true
+// }
 // font-serif "old-style"
 // font-sans "neogrotesque"
 // font-mono "mono-code"
@@ -80,6 +87,8 @@ base-url "https://example.com/fic/"
 ```
 
 Relative `stories` and `css` paths (aliases: `stories-dir`, `stories-directory`; `custom-css`, `stylesheet`) are resolved relative to the directory containing `site.kdl`. When `local-browsing` is `true` (the default), each HTML page includes a tiny script that rewrites relative directory links to `index.html` only when viewed over `file://`; set `local-browsing false` to omit it.
+
+**NSFW Display & Import Rules:** By default (`hide-nsfw true`, or `nsfw "hide"`), works, chapters, and `<nsfw>` sections marked NSFW still appear normally in archive listings (with an `NSFW` / `Contains NSFW` badge), while their content is placed behind an inline confirmation dialog offering to show it **once**, **permanently for that work/chapter**, or **permanently for the site** (persisted via cookies, with a footer `Re-hide NSFW` control to clear saved preferences). With JavaScript disabled (`<noscript>`), NSFW content is shown by default beneath a clear NSFW warning banner. Set `hide-nsfw false` (or `nsfw "show"`) to display all NSFW content normally without gating. On `ficgen import`, `import-nsfw` controls which AO3 ratings, archive warnings, additional tags, and chapter title/summary/start-note markers automatically add `nsfw true`; narrow any list, set a category or `import-nsfw false` to disable it, or specify custom tag keywords.
 
 **Fonts:** Set `font-serif`, `font-sans`, and `font-mono` (or group them in a `fonts { serif "..."; sans "..."; mono "..." }` block) to any built-in preset name—`system-ui`, `transitional`, `old-style`, `humanist`, `geometric-humanist`, `classical-humanist`, `neogrotesque`, `mono-slab-serif`, `mono-code`, `industrial`, `rounded-sans`, `slab-serif`, `antique`, `didone`, `handwritten`—or supply a custom CSS font stack (either as a single CSS string like `"'Literata', Georgia, serif"` or as multiple KDL string arguments like `font-serif "Literata" "Georgia"`). Custom stacks without an ultimate generic fallback automatically have `serif`, `sans-serif`, or `monospace` appended; placing a generic fallback keyword before another font fails the build with an error.
 
@@ -124,6 +133,7 @@ ficgen new "Quick Shot" --published --fandom "Original Work" --category "F/F" --
 | `-m`, `--multi` | `false` | Create a multi-chapter layout (`story.kdl` + `ch1.md`) instead of `index.md`. |
 | `--chapters N` | `1` | Number of starter chapter files (`ch1.md`..`chN.md`); implies `--multi` when `> 1`. |
 | `--published` | `false` | Omit `published false` and stamp today's `date` (default starts stories as drafts). |
+| `--nsfw` | `false` | Mark the starter story with `nsfw true`. |
 | `--date DATE` | `""` | Explicit ISO-8601 `date` to include in starter metadata. |
 | `--fandom`, `--category`, `--relationship`, `--character`, `--tag` | `""` | Repeatable metadata tags to pre-populate. |
 | `--stories PATH` | `site.kdl` `stories`, or `./_stories` (or `../_stories`) | Stories directory where the new folder is created. |
@@ -156,6 +166,7 @@ Import behavior:
 - Automatically wraps network fetches in `withCache(withRetry(...))` to respect `429 Retry-After` rate limits and transient `5xx` errors.
 - Converts work/chapter prose, summaries, and start/end notes from HTML into clean Markdown.
 - Writes single-chapter works to `index.md` and multi-chapter works to `story.kdl` + `ch1.md`, `ch2.md`, ..., pulling per-chapter publication dates from `/works/<id>/navigate` when available.
+- Automatically detects NSFW-indicating AO3 ratings (`Explicit`, `Mature`, `Not Rated`), archive warnings (`Rape/Non-Con`, `Underage Sex`, `Graphic Depictions Of Violence`), additional tags, and per-chapter NSFW markers in chapter titles/summaries/start notes, adding `nsfw true` accordingly (customizable via `import-nsfw` in `site.kdl`).
 
 ### Stamping Publication Dates (`ficgen stamp`)
 
@@ -299,6 +310,7 @@ tags {
 | `date` | `published-date` | `"YYYY-MM-DD"`, `(date)"YYYY-MM-DD"`, or `(date-time)"..."` | Publication date. Multi-chapter stories default to the earliest explicit chapter `date`. Falls back to file `mtime` for Atom feeds only (HTML hides dates unless explicitly set). |
 | `updated` | `updated-date` | ISO-8601 string or `(date)` / `(date-time)` | Last updated date. Defaults to `date` for one-shots, or latest chapter `date` for multi-chapter works. Shown in HTML only when different from `Published`. |
 | `published` | — | boolean (`true` / `false`, default `true`) | Set `false` to mark a story or chapter as a draft. |
+| `nsfw` | — | boolean (`true` / `false`, default `false`) or reason string | Mark a whole work (`index.md`/`story.kdl`) or single chapter (`chN.md`) as NSFW, optionally with a reason (e.g. `nsfw "Graphic violence"` or `nsfw true reason="..."`). |
 | `complete` | `status` | boolean (`true` / `false`) or `"Complete"` / `"In Progress"` | Defaults to `true` for one-shots and `false` for multi-chapter stories. |
 | `planned-chapters` | `total-chapters` | integer ≥ 1 | Sets the denominator in chapter counts (e.g. `2/5` instead of `2/?`). |
 | `chapter` | — | integer ≥ 1 | Explicit chapter number for chapter files (inferred from `chN.md` if omitted). |
@@ -324,15 +336,16 @@ Lines wrapped in `\<...|` (or unescaped `<...|`) and `|...>` render as styled SM
 - Full inline Markdown (`_italics_`, `**bold**`, smart quotes, emoji, auto-linked URLs) works inside bubbles.
 - Chat syntax inside fenced code blocks is ignored.
 
-### Author's Notes & Summary Blocks
+### Author's Notes, Summary & NSFW Section Blocks
 
-Place `<notes>`, `<endnotes>`, or `<summary>` tags anywhere in a story or chapter Markdown file (outside fenced code blocks), or specify `notes`, `endnotes`, or `summary` strings in `story.kdl`:
+Place `<notes>`, `<endnotes>`, `<summary>`, or `<nsfw>` tags anywhere in a story or chapter Markdown file (outside fenced code blocks), or specify `notes`, `endnotes`, or `summary` strings in `story.kdl`:
 
 - **`<notes>...</notes>`** (aliases: `<startnotes>`, `<beginnotes>`): Rendered in a styled **Notes** box above the prose.
 - **`<endnotes>...</endnotes>`**: Extracted and rendered in an **End Notes** box below the prose (`id="endnotes"`), with an automatic jump link (`See the end of the story/chapter for notes.`) placed in the header.
 - **`<summary>...</summary>`**: Multi-paragraph Markdown summary (combined with any `summary` KDL node).
+- **`<nsfw>...</nsfw>`** (optional `reason="..."` / `label="..."` attribute): Marks a prose section inside a work or chapter as NSFW while supporting full Markdown formatting inside. Counts toward prose word count, hides behind an inline confirmation dialog when `hide-nsfw` is enabled, and displays with an NSFW warning banner under `<noscript>`.
 
-All three support full Markdown formatting and auto-linked URLs.
+All four support full Markdown formatting and auto-linked URLs.
 
 ### Smart Typography & Auto-Linking
 

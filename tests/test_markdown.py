@@ -76,3 +76,43 @@ def test_word_count_and_excerpt() -> None:
     excerpt = makeExcerpt("<p>" + "word " * 60 + "</p>", maxChars=30)
     assert excerpt.endswith("\u2026")
     assert len(excerpt) <= 31
+
+
+def test_nsfw_section_blocks_render_and_preserve_word_counts() -> None:
+    """`<nsfw>` blocks render nested Markdown, skip code fences, and exclude warning UI from word counts."""
+    renderer = MarkdownRenderer(hideNsfw=True)
+    source = (
+        "Safe intro.\n\n"
+        + '<nsfw reason="Graphic violence">\n'
+        + "First *intense* line.\n\n"
+        + "|Are you okay?>\n"
+        + "</nsfw>\n\n"
+        + "<nsfw>Single line **spicy** beat.</nsfw>\n\n"
+        + "```html\n<nsfw>Not a section</nsfw>\n```\n\n"
+        + "Safe outro."
+    )
+    html, hasNsfw = renderer.renderBody(source)
+    assert hasNsfw is True
+    assert 'data-nsfw-gate="section"' in html
+    assert 'data-nsfw-reason="Graphic violence"' in html
+    assert "<noscript>" in html
+    assert "NSFW Warning:" in html
+    assert "<em>intense</em>" in html
+    assert 'class="chat-msg chat-right"' in html
+    assert "<strong>spicy</strong>" in html
+    assert "<pre><code" in html
+
+    # Word count counts story prose (including NSFW prose) but excludes <noscript> warning text.
+    plain = stripHtmlTags(html)
+    assert "NSFW Warning" not in plain
+    assert "First intense line." in plain
+    assert "Single line spicy beat." in plain
+
+    # When hideNsfw=False, sections render cleanly without gates or noscript warnings.
+    shownRenderer = MarkdownRenderer(hideNsfw=False)
+    shownHtml, shownHasNsfw = shownRenderer.renderBody("<nsfw>\nHello there.\n</nsfw>")
+    assert shownHasNsfw is True
+    assert '<section class="nsfw-section">' in shownHtml
+    assert "data-nsfw-gate" not in shownHtml
+    assert "<noscript>" not in shownHtml
+    assert countWords(shownHtml) == 2

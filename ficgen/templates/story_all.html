@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+{% set workGated = story.nsfw and archive.config.hideNsfw %}
 <nav class="breadcrumb" aria-label="Breadcrumb">
   <a href="{{ rootPrefix }}">All Stories</a>
   <span class="breadcrumb-sep" aria-hidden="true">/</span>
@@ -8,12 +9,13 @@
   <span>Entire Work</span>
 </nav>
 
-<article class="work">
+<article class="work" data-nsfw-work="{{ story.slug }}">
   <header class="work-header">
     <h1>
       {{ story.title }}
       <span class="badge badge-view">Entire Work</span>
       {% if not story.published %}<span class="badge badge-draft">Draft</span>{% endif %}
+      {% if story.nsfw %}<span class="badge badge-nsfw">NSFW</span>{% elif story.hasNsfwContent %}<span class="badge badge-nsfw">Contains NSFW</span>{% endif %}
     </h1>
     {% if story.author %}
     <p class="work-byline">by {{ story.author }}</p>
@@ -35,7 +37,7 @@
     </section>
     {% endif %}
 
-    {% if story.notesHtml %}
+    {% if not workGated and story.notesHtml %}
     <aside class="author-notes" aria-labelledby="work-notes-heading">
       <h2 id="work-notes-heading">Notes</h2>
       {{ story.notesHtml | safe }}
@@ -50,6 +52,7 @@
         <li>
           <a href="#ch-{{ chapter.number }}">{{ chapter.displayTitle }}</a>
           {% if not chapter.published %}<span class="badge badge-draft">Draft</span>{% endif %}
+          {% if chapter.nsfw %}<span class="badge badge-nsfw">NSFW</span>{% elif chapter.hasNsfwSections %}<span class="badge badge-nsfw">Contains NSFW</span>{% endif %}
         </li>
         {% endfor %}
       </ol>
@@ -57,12 +60,30 @@
     {% endif %}
   </header>
 
+  {% if workGated %}
+  <div class="nsfw-gate" data-nsfw-gate="work" data-nsfw-work="{{ story.slug }}"{% if story.nsfwReason %} data-nsfw-reason="{{ story.nsfwReason }}"{% endif %}>
+    <noscript>
+      <aside class="nsfw-warning" role="note">
+        <strong>NSFW Warning:</strong> This work contains NSFW content{% if story.nsfwReason %} ({{ story.nsfwReason }}){% endif %}.
+      </aside>
+    </noscript>
+    <div class="nsfw-content">
+      {% if story.notesHtml %}
+      <aside class="author-notes" aria-labelledby="work-notes-heading">
+        <h2 id="work-notes-heading">Notes</h2>
+        {{ story.notesHtml | safe }}
+      </aside>
+      {% endif %}
+  {% endif %}
+
   {% for chapter in story.chapters %}
-  <section class="entire-chapter" id="ch-{{ chapter.number }}">
+  {% set chGated = (not workGated) and chapter.nsfw and archive.config.hideNsfw %}
+  <section class="entire-chapter" id="ch-{{ chapter.number }}" data-nsfw-chapter="{{ story.slug }}/{{ chapter.slug }}">
     <header class="entire-chapter-header">
       <h2>
         <a href="{{ chapter.filename }}">{{ chapter.displayTitle }}</a>
         {% if not chapter.published %}<span class="badge badge-draft">Draft</span>{% endif %}
+        {% if chapter.nsfw %}<span class="badge badge-nsfw">NSFW</span>{% elif chapter.hasNsfwSections %}<span class="badge badge-nsfw">Contains NSFW</span>{% endif %}
       </h2>
       <p class="chapter-meta">
         {{ chapter.wordCount | format_num }} words{% if chapter.hasExplicitDate %} &middot; <time datetime="{{ chapter.date.strftime('%Y-%m-%d') }}">{{ chapter.date.strftime('%Y-%m-%d') }}</time>{% endif %}
@@ -75,19 +96,54 @@
       </section>
       {% endif %}
 
-      {% if chapter.notesHtml %}
-      <aside class="author-notes">
-        <h3>Notes</h3>
-        {{ chapter.notesHtml | safe }}
-        {% if chapter.endnotesHtml %}
-        <p class="endnotes-pointer">See the <a href="#endnotes-ch-{{ chapter.number }}">end of this chapter</a> for more notes.</p>
+      {% if not chGated %}
+        {% if chapter.notesHtml %}
+        <aside class="author-notes">
+          <h3>Notes</h3>
+          {{ chapter.notesHtml | safe }}
+          {% if chapter.endnotesHtml %}
+          <p class="endnotes-pointer">See the <a href="#endnotes-ch-{{ chapter.number }}">end of this chapter</a> for more notes.</p>
+          {% endif %}
+        </aside>
+        {% elif chapter.endnotesHtml %}
+        <p class="endnotes-pointer">See the <a href="#endnotes-ch-{{ chapter.number }}">end of this chapter</a> for notes.</p>
         {% endif %}
-      </aside>
-      {% elif chapter.endnotesHtml %}
-      <p class="endnotes-pointer">See the <a href="#endnotes-ch-{{ chapter.number }}">end of this chapter</a> for notes.</p>
       {% endif %}
     </header>
 
+    {% if chGated %}
+    <div class="nsfw-gate" data-nsfw-gate="chapter" data-nsfw-work="{{ story.slug }}" data-nsfw-chapter="{{ story.slug }}/{{ chapter.slug }}"{% if chapter.nsfwReason %} data-nsfw-reason="{{ chapter.nsfwReason }}"{% endif %}>
+      <noscript>
+        <aside class="nsfw-warning" role="note">
+          <strong>NSFW Warning:</strong> This chapter contains NSFW content{% if chapter.nsfwReason %} ({{ chapter.nsfwReason }}){% endif %}.
+        </aside>
+      </noscript>
+      <div class="nsfw-content">
+        {% if chapter.notesHtml %}
+        <aside class="author-notes">
+          <h3>Notes</h3>
+          {{ chapter.notesHtml | safe }}
+          {% if chapter.endnotesHtml %}
+          <p class="endnotes-pointer">See the <a href="#endnotes-ch-{{ chapter.number }}">end of this chapter</a> for more notes.</p>
+          {% endif %}
+        </aside>
+        {% elif chapter.endnotesHtml %}
+        <p class="endnotes-pointer">See the <a href="#endnotes-ch-{{ chapter.number }}">end of this chapter</a> for notes.</p>
+        {% endif %}
+
+        <div class="prose">
+          {{ chapter.bodyHtml | safe }}
+        </div>
+
+        {% if chapter.endnotesHtml %}
+        <aside class="author-notes end-notes" id="endnotes-ch-{{ chapter.number }}">
+          <h3>Chapter End Notes</h3>
+          {{ chapter.endnotesHtml | safe }}
+        </aside>
+        {% endif %}
+      </div>
+    </div>
+    {% else %}
     <div class="prose">
       {{ chapter.bodyHtml | safe }}
     </div>
@@ -98,6 +154,7 @@
       {{ chapter.endnotesHtml | safe }}
     </aside>
     {% endif %}
+    {% endif %}
   </section>
   {% endfor %}
 
@@ -106,6 +163,11 @@
     <h2 id="work-endnotes-heading">End Notes</h2>
     {{ story.endnotesHtml | safe }}
   </aside>
+  {% endif %}
+
+  {% if workGated %}
+    </div>
+  </div>
   {% endif %}
 </article>
 

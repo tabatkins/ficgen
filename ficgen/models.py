@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -22,9 +22,43 @@ from .css import (
 
 DEFAULT_STORIES_DIR_NAME: t.Final[str] = "_stories"
 
+DEFAULT_NSFW_RATINGS: t.Final[tuple[str, ...]] = (
+    "Explicit",
+    "Mature",
+    "Not Rated",
+)
+DEFAULT_NSFW_WARNINGS: t.Final[tuple[str, ...]] = (
+    "Rape/Non-Con",
+    "Underage Sex",
+    "Graphic Depictions Of Violence",
+)
+DEFAULT_NSFW_TAGS: t.Final[tuple[str, ...]] = (
+    "nsfw",
+    "smut",
+    "porn",
+    "pwp",
+    "porn without plot",
+    "porn with plot",
+    "plot what plot",
+    "erotica",
+    "explicit sexual content",
+    "sexual content",
+    "lemon",
+    "lime",
+    "gore",
+    "explicit violence",
+    "non-con",
+    "dub-con",
+    "dubious consent",
+    "bdsm",
+)
+
 __all__ = [
     "DEFAULT_CUSTOM_CSS_NAME",
     "DEFAULT_MONO_FONT",
+    "DEFAULT_NSFW_RATINGS",
+    "DEFAULT_NSFW_TAGS",
+    "DEFAULT_NSFW_WARNINGS",
     "DEFAULT_SANS_FONT",
     "DEFAULT_SERIF_FONT",
     "DEFAULT_STORIES_DIR_NAME",
@@ -33,6 +67,7 @@ __all__ = [
     "Archive",
     "Chapter",
     "FeedEntry",
+    "ImportNsfwConfig",
     "SiteConfig",
     "Story",
     "TaxonomyBucket",
@@ -102,6 +137,16 @@ class TaxonomyItem(t.NamedTuple):
 
 
 @dataclass(slots=True)
+class ImportNsfwConfig:
+    """Controls which AO3 metadata automatically marks imported works/chapters as NSFW."""
+
+    ratings: tuple[str, ...] = DEFAULT_NSFW_RATINGS
+    warnings: tuple[str, ...] = DEFAULT_NSFW_WARNINGS
+    tags: tuple[str, ...] = DEFAULT_NSFW_TAGS
+    detectChapters: bool = True
+
+
+@dataclass(slots=True)
 class SiteConfig:
     """Configuration for building the static fiction archive."""
 
@@ -113,6 +158,8 @@ class SiteConfig:
     baseUrl: str = "https://example.com/"
     includeDrafts: bool = False
     localBrowsing: bool = True
+    hideNsfw: bool = True
+    importNsfw: ImportNsfwConfig = field(default_factory=ImportNsfwConfig)
     fontSerif: str = DEFAULT_SERIF_FONT
     fontSans: str = DEFAULT_SANS_FONT
     fontMono: str = DEFAULT_MONO_FONT
@@ -147,6 +194,9 @@ class Chapter:
     extraCharacters: t.MetadataList = ()
     extraTags: t.MetadataList = ()
     cssBlocks: tuple[str, ...] = ()
+    nsfw: bool = False
+    nsfwReason: str = ""
+    hasNsfwSections: bool = False
 
     @property
     def displayTitle(self) -> str:
@@ -159,6 +209,11 @@ class Chapter:
     def filename(self) -> str:
         """Output HTML filename for this chapter within the story folder."""
         return f"{self.slug}.html"
+
+    @property
+    def hasNsfwContent(self) -> bool:
+        """Return True if this chapter is marked NSFW or contains any NSFW section."""
+        return self.nsfw or self.hasNsfwSections
 
 
 @dataclass(slots=True)
@@ -191,6 +246,9 @@ class Story:
     chapters: tuple[Chapter, ...]
     sourceDir: Path
     cssBlocks: tuple[str, ...] = ()
+    nsfw: bool = False
+    nsfwReason: str = ""
+    hasNsfwSections: bool = False
 
     @property
     def chapterCountDisplay(self) -> str:
@@ -218,6 +276,16 @@ class Story:
     def hasDraftChapters(self) -> bool:
         """Return True if any included chapter is marked unpublished."""
         return any(not chapter.published for chapter in self.chapters)
+
+    @property
+    def hasNsfwChapters(self) -> bool:
+        """Return True if any included chapter is marked NSFW."""
+        return any(chapter.nsfw for chapter in self.chapters)
+
+    @property
+    def hasNsfwContent(self) -> bool:
+        """Return True if this story, any chapter, or any section is marked NSFW."""
+        return self.nsfw or self.hasNsfwSections or any(chapter.hasNsfwContent for chapter in self.chapters)
 
     def taxonomyNames(self, kind: t.TaxonomyKind) -> t.MetadataList:
         """Return the tuple of display names for a given taxonomy kind."""

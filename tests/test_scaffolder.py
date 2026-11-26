@@ -145,6 +145,9 @@ def test_cli_new(tmp_path: Path) -> None:
     assert (storiesDir / "custom-multi" / "story.kdl").is_file()
     assert (storiesDir / "custom-multi" / "ch1.md").is_file()
 
+    assert main(["new", "Spicy Draft", "--nsfw", "--stories", str(storiesDir)]) == 0
+    assert "nsfw true" in (storiesDir / "spicy-draft" / "index.md").read_text(encoding="utf-8")
+
     # Duplicate returns exit code 1.
     assert main(["new", "CLI One Shot", "--stories", str(storiesDir)]) == 1
 
@@ -171,17 +174,28 @@ def test_cli_init_scaffolds_empty_folder_and_builds_cleanly(
     storyKdl = archiveDir / "_stories" / "example-multi-chapter" / "story.kdl"
     ch1Md = archiveDir / "_stories" / "example-multi-chapter" / "ch1.md"
     ch2Md = archiveDir / "_stories" / "example-multi-chapter" / "ch2.md"
+    nsfwStoryKdl = archiveDir / "_stories" / "example-nsfw" / "story.kdl"
+    nsfwCh1Md = archiveDir / "_stories" / "example-nsfw" / "ch1.md"
+    nsfwCh2Md = archiveDir / "_stories" / "example-nsfw" / "ch2.md"
     assert oneShotMd.is_file()
     assert storyKdl.is_file()
     assert ch1Md.is_file()
     assert ch2Md.is_file()
+    assert nsfwStoryKdl.is_file()
+    assert nsfwCh1Md.is_file()
+    assert nsfwCh2Md.is_file()
 
     # Example stories use placeholder Lorem Ipsum prose and include commented optional metadata.
     assert "Lorem ipsum" in oneShotMd.read_text(encoding="utf-8")
     assert "Lorem ipsum" in ch1Md.read_text(encoding="utf-8")
+    assert "<nsfw>" in nsfwCh1Md.read_text(encoding="utf-8")
+    assert '<nsfw reason="' in nsfwCh1Md.read_text(encoding="utf-8")
+    assert "nsfw true" in nsfwCh2Md.read_text(encoding="utf-8")
     siteKdlText = (archiveDir / "site.kdl").read_text(encoding="utf-8")
     assert "// include-drafts false" in siteKdlText
     assert "// local-browsing true" in siteKdlText
+    assert "// hide-nsfw true" in siteKdlText
+    assert "// import-nsfw {" in siteKdlText
     assert '// stories "_stories"' in siteKdlText
     assert '// font-serif "old-style"' in siteKdlText
     assert '// font-sans "neogrotesque"' in siteKdlText
@@ -189,7 +203,7 @@ def test_cli_init_scaffolds_empty_folder_and_builds_cleanly(
     assert '// css "site.css" mode="append"' in siteKdlText
     assert "// planned-chapters" in storyKdl.read_text(encoding="utf-8")
 
-    # Running `ficgen build` right away succeeds with zero warnings and generates both stories.
+    # Running `ficgen build` right away succeeds with zero warnings and generates all example stories.
     with caplog.at_level(logging.WARNING, logger="ficgen"):
         assert main(["build"]) == 0
     assert caplog.records == []
@@ -199,6 +213,10 @@ def test_cli_init_scaffolds_empty_folder_and_builds_cleanly(
     assert (archiveDir / "example-multi-chapter" / "ch1.html").is_file()
     assert (archiveDir / "example-multi-chapter" / "ch2.html").is_file()
     assert (archiveDir / "example-multi-chapter" / "all.html").is_file()
+    assert (archiveDir / "example-nsfw" / "index.html").is_file()
+    assert 'data-nsfw-gate="section"' in (archiveDir / "example-nsfw" / "ch1.html").read_text(encoding="utf-8")
+    assert 'data-nsfw-gate="chapter"' in (archiveDir / "example-nsfw" / "ch2.html").read_text(encoding="utf-8")
+    assert (archiveDir / "example-nsfw" / "all.html").is_file()
 
 
 def test_init_site_rejects_non_empty_directory_and_files(
@@ -249,8 +267,9 @@ def test_init_site_commented_metadata_is_valid_when_uncommented(
     monkeypatch.chdir(archiveDir)
     config = buildConfigFromArgs(["--drafts"])
     archive = loadArchive(config)
-    assert len(archive.stories) == 2
+    assert len(archive.stories) == 3
     generateSite(archive)
     assert (archiveDir / "example-one-shot" / "index.html").is_file()
     assert (archiveDir / "example-multi-chapter" / "ch2.html").is_file()
+    assert (archiveDir / "example-nsfw" / "ch2.html").is_file()
     assert "--accent: rebeccapurple;" in (archiveDir / "style.css").read_text(encoding="utf-8")

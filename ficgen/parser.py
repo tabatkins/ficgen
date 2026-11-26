@@ -12,12 +12,16 @@ import kdl
 from . import t
 from .kdlMeta import (
     StoryParseError,
+    coerceStringValue,
+    findNodes,
     getBoolField,
     getDateField,
     getIntField,
     getListField,
     getStringField,
+    isKdlNull,
     mergeDocuments,
+    normalizeKey,
     parseKdlDocument,
     readUtf8File,
 )
@@ -300,6 +304,41 @@ def _extractTaxonomyFields(
     return {kind: getListField(meta, *keys, sourceDesc=sourceDesc) for kind, keys in _TAXONOMY_FIELD_KEYS.items()}
 
 
+def _getNsfwField(doc: kdl.Document, sourceDesc: str) -> tuple[bool, str]:
+    """Parse an optional `nsfw` KDL field (bool, string reason, or `reason="..."` prop)."""
+    for node in reversed(findNodes(doc, "nsfw")):
+        reason = ""
+        for propName, propVal in node.props.items():
+            if normalizeKey(propName) in {"reason", "label", "warning"}:
+                reason = coerceStringValue(propVal, propName, sourceDesc)
+
+        if not node.args:
+            return (True, reason)
+
+        first = node.args[0]
+        if isKdlNull(first):
+            continue
+        if isinstance(first, bool):
+            return (first, reason if first else "")
+        if isinstance(first, kdl.Bool):
+            return (first.value, reason if first.value else "")
+        if isinstance(first, str):
+            cleaned = first.strip()
+            lowered = cleaned.lower()
+            if lowered in {"true", "yes"}:
+                return (True, reason)
+            if lowered in {"false", "no"}:
+                return (False, "")
+            if cleaned:
+                return (True, reason or cleaned)
+            continue
+
+        msg = f"Invalid value for KDL field {node.name!r} in {sourceDesc}: {first!r} (expected bool or reason string)"
+        raise StoryParseError(msg)
+
+    return (False, "")
+
+
 def _mergeLists(*lists: t.MetadataList) -> t.MetadataList:
     """Merge multiple metadata lists while preserving order and case-insensitive uniqueness."""
     seen: set[str] = set()
@@ -359,12 +398,13 @@ def _loadChapter(
         chapterTitle = ""
 
     published = getBoolField(meta, "published", default=True, sourceDesc=sourceDesc)
+    nsfw, nsfwReason = _getNsfwField(meta, sourceDesc)
     date, hasExplicitDate = getDateField(meta, chapterPath, *_DATE_KEYS)
 
     summaryHtml = renderer.render(parsed.summaryMd)
     notesHtml = renderer.render(parsed.notesMd)
     endnotesHtml = renderer.render(parsed.endnotesMd)
-    bodyHtml = renderer.render(parsed.bodyMd)
+    bodyHtml, hasNsfwSections = renderer.renderBody(parsed.bodyMd)
     wordCount = countWords(bodyHtml)
     summaryText = stripHtmlTags(summaryHtml) if summaryHtml else makeExcerpt(bodyHtml)
 
@@ -393,6 +433,9 @@ def _loadChapter(
         extraCharacters=tax["characters"],
         extraTags=tax["tags"],
         cssBlocks=chapterCssBlocks,
+        nsfw=nsfw,
+        nsfwReason=nsfwReason,
+        hasNsfwSections=hasNsfwSections,
     )
 
 
@@ -458,6 +501,7 @@ def _loadSingleDocStory(
     title = getStringField(meta, "title", sourceDesc=sourceDesc) or indexDoc.title or _humanizeSlug(slug)
     author = getStringField(meta, "author", sourceDesc=sourceDesc) or config.author
     complete = getBoolField(meta, "complete", "status", default=True, sourceDesc=sourceDesc)
+    nsfw, nsfwReason = _getNsfwField(meta, sourceDesc)
 
     date, hasExplicitDate = getDateField(meta, indexMdPath, *_DATE_KEYS)
     updated, hasUpdated = getDateField(meta, indexMdPath, *_UPDATED_KEYS)
@@ -472,7 +516,7 @@ def _loadSingleDocStory(
     summaryHtml = renderer.render(summaryMd)
     notesHtml = renderer.render(notesMd)
     endnotesHtml = renderer.render(endnotesMd)
-    bodyHtml = renderer.render(indexDoc.bodyMd)
+    bodyHtml, hasNsfwSections = renderer.renderBody(indexDoc.bodyMd)
     wordCount = countWords(bodyHtml)
     summaryText = stripHtmlTags(summaryHtml) if summaryHtml else makeExcerpt(bodyHtml)
     workCssBlocks = tuple(block for block in (workCssFile, *indexDoc.cssBlocks) if block)
@@ -505,6 +549,9 @@ def _loadSingleDocStory(
         chapters=(),
         sourceDir=storyDir,
         cssBlocks=workCssBlocks,
+        nsfw=nsfw,
+        nsfwReason=nsfwReason,
+        hasNsfwSections=hasNsfwSections,
     )
 
 
@@ -605,6 +652,11 @@ def _loadMultiChapterStory(
     author = getStringField(storyMeta, "author", sourceDesc=sourceDesc) or config.author
     complete = getBoolField(storyMeta, "complete", "status", default=False, sourceDesc=sourceDesc)
     plannedChapters = getIntField(storyMeta, "planned-chapters", "total-chapters", sourceDesc=sourceDesc)
+    # Only apply work-level NSFW when whole-work metadata comes from story.kdl/index.md (not chapter 1 fallback).
+    if header.preloadedFirstChapter is None:
+        nsfw, nsfwReason = _getNsfwField(storyMeta, sourceDesc)
+    else:
+        nsfw, nsfwReason = (False, "")
 
     workTax = _extractTaxonomyFields(storyMeta, sourceDesc)
     fandoms = _mergeLists(workTax["fandoms"], *(ch.extraFandoms for ch in includedChapters))
@@ -658,6 +710,8 @@ def _loadMultiChapterStory(
         chapters=includedChapters,
         sourceDir=storyDir,
         cssBlocks=workCssBlocks,
+        nsfw=nsfw,
+        nsfwReason=nsfwReason,
     )
 
 
@@ -805,7 +859,7 @@ def _warnUndatedStories(stories: tuple[Story, ...]) -> None:
 def loadArchive(config: SiteConfig) -> Archive:
     """Scan storiesDir and construct a fully indexed Archive."""
     storyDirs = discoverStoryDirs(config.storiesDir)
-    renderer = MarkdownRenderer()
+    renderer = MarkdownRenderer(hideNsfw=config.hideNsfw)
 
     allStorySlugs = tuple(storyDir.name for storyDir in storyDirs)
     loaded: list[Story] = []

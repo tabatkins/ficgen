@@ -18,6 +18,11 @@
       {% if not story.published or story.hasDraftChapters %}
       <span class="badge badge-draft">Draft</span>
       {% endif %}
+      {% if story.nsfw %}
+      <span class="badge badge-nsfw">NSFW</span>
+      {% elif story.hasNsfwContent %}
+      <span class="badge badge-nsfw">Contains NSFW</span>
+      {% endif %}
     </div>
   </header>
 

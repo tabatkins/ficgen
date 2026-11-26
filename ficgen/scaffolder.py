@@ -42,6 +42,7 @@ class InitOptions:
     multiChapter: bool = False
     chapterCount: int = 1
     published: bool = False
+    nsfw: bool = False
     dateValue: str = ""
     fandoms: t.MetadataList = ()
     categories: t.MetadataList = ()
@@ -103,6 +104,9 @@ def _buildStoryMetadataLines(options: InitOptions, *, includeTitle: bool, includ
     lines.append(_kdlListOrEmpty("characters", options.characters))
     lines.append(_kdlListOrEmpty("relationships", options.relationships))
     lines.append(_kdlListOrEmpty("tags", options.tags))
+
+    if options.nsfw:
+        lines.append("nsfw true")
 
     if includePublishState:
         if options.dateValue:
@@ -191,6 +195,13 @@ def _buildDefaultSiteKdl() -> str:
         + f'// stories "{DEFAULT_STORIES_DIR_NAME}"\n'
         + "// include-drafts false\n"
         + "// local-browsing true\n"
+        + "// hide-nsfw true  // hide NSFW works/chapters/sections behind a confirmation dialog (or false to show normally)\n"
+        + "// import-nsfw {\n"
+        + '//     ratings "Explicit" "Mature" "Not Rated"\n'
+        + '//     warnings "Rape/Non-Con" "Underage Sex" "Graphic Depictions Of Violence"\n'
+        + "//     tags true\n"
+        + "//     chapters true\n"
+        + "// }\n"
         + f'// font-serif "{DEFAULT_SERIF_FONT}"    // presets: old-style, transitional, slab-serif, antique, didone (or custom CSS font stack)\n'
         + f'// font-sans "{DEFAULT_SANS_FONT}"  // presets: neogrotesque, system-ui, humanist, geometric-humanist, classical-humanist, industrial, rounded-sans, handwritten\n'
         + f'// font-mono "{DEFAULT_MONO_FONT}"     // presets: mono-code, mono-slab-serif (or custom CSS font stack)\n'
@@ -219,6 +230,7 @@ def _buildExampleOneShotMd(todayDate: str) -> str:
         + '// endnotes "Optional end notes (or use an <endnotes> block below)."\n'
         + f"// updated {dateLit}\n"
         + "// published false\n"
+        + "// nsfw false\n"
         + "// complete true\n"
         + "```\n\n"
         + "<summary>\n"
@@ -264,8 +276,34 @@ def _buildExampleMultiStoryKdl(todayDate: str) -> str:
         + f"// date {dateLit}\n"
         + f"// updated {dateLit}\n"
         + "// published false\n"
+        + "// nsfw false\n"
         + "// complete false\n"
         + "// planned-chapters 3\n"
+    )
+
+
+def _buildExampleNsfwStoryKdl(todayDate: str) -> str:
+    """Build an example multi-chapter story.kdl showcasing chapter- and section-level NSFW gating."""
+    dateLit = formatKdlString(todayDate)
+    return (
+        'title "Example NSFW Story"\n'
+        + 'fandoms "Original Work"\n'
+        + 'categories "Gen"\n'
+        + 'characters "Character E" "Character F"\n'
+        + 'tags "Example" "NSFW"\n'
+        + 'summary "Demonstrates inline <nsfw> blocks in Chapter 1 and a full NSFW chapter in Chapter 2 '
+        + '(all prose is placeholder Lorem Ipsum)."\n'
+        + '// author "Your Name"\n'
+        + '// rating "Mature"\n'
+        + '// warnings "No Archive Warnings Apply"\n'
+        + '// notes "Optional work-level top notes."\n'
+        + '// endnotes "Optional work-level end notes."\n'
+        + f"// date {dateLit}\n"
+        + f"// updated {dateLit}\n"
+        + "// published false\n"
+        + "// nsfw true  // uncomment to mark the entire work as NSFW\n"
+        + "// complete true\n"
+        + "// planned-chapters 2\n"
     )
 
 
@@ -276,15 +314,18 @@ def _buildExampleChapterMd(
     *,
     noteBlock: str,
     prose: str,
+    nsfw: bool = False,
 ) -> str:
     """Build an example multi-chapter Markdown file with commented optional metadata."""
     dateLit = formatKdlString(todayDate)
     titleLit = formatKdlString(title)
+    nsfwLine = "nsfw true\n" if nsfw else "// nsfw false\n"
     return (
         f"# {title}\n\n"
         + "```metadata\n"
         + f"chapter {chapterNum}\n"
         + f"date {dateLit}\n"
+        + nsfwLine
         + f"// title {titleLit}\n"
         + _EXAMPLE_CHAPTER_COMMENTED_META
         + "```\n\n"
@@ -369,6 +410,64 @@ def initSite(targetDir: Path) -> SiteInitResult:
         encoding="utf-8",
     )
     created.append(ch2Path)
+
+    nsfwDir = storiesDir / "example-nsfw"
+    nsfwDir.mkdir(parents=True, exist_ok=False)
+    nsfwStoryKdlPath = nsfwDir / "story.kdl"
+    nsfwStoryKdlPath.write_text(_buildExampleNsfwStoryKdl(todayDate), encoding="utf-8")
+    created.append(nsfwStoryKdlPath)
+
+    nsfwCh1Path = nsfwDir / "ch1.md"
+    nsfwCh1Path.write_text(
+        _buildExampleChapterMd(
+            1,
+            "Inline NSFW Sections",
+            todayDate,
+            noteBlock=(
+                "<notes>\n"
+                + "This chapter is SFW overall, with two placeholder `<nsfw>` sections inside the prose.\n"
+                + "</notes>"
+            ),
+            prose=(
+                "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio. "
+                + "Praesent libero. Sed cursus ante dapibus diam.\n\n"
+                + "<nsfw>\n"
+                + "Sed nisi. Nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum. "
+                + "Praesent mauris. Fusce nec tellus sed augue semper porta.\n"
+                + "</nsfw>\n\n"
+                + "Mauris massa. Vestibulum lacinia arcu eget nulla. Class aptent taciti sociosqu "
+                + "ad litora torquent per conubia nostra.\n\n"
+                + '<nsfw reason="Example content warning">\n'
+                + "Curabitur sodales ligula in libero. Sed dignissim lacinia nunc. "
+                + "Curabitur tortor. Pellentesque nibh.\n"
+                + "</nsfw>\n\n"
+                + "Aenean quam. In scelerisque sem at dolor. Maecenas mattis. Sed convallis tristique sem."
+            ),
+        ),
+        encoding="utf-8",
+    )
+    created.append(nsfwCh1Path)
+
+    nsfwCh2Path = nsfwDir / "ch2.md"
+    nsfwCh2Path.write_text(
+        _buildExampleChapterMd(
+            2,
+            "Full NSFW Chapter",
+            todayDate,
+            nsfw=True,
+            noteBlock=(
+                "<notes>\n" + "This entire chapter is marked `nsfw true` in its KDL metadata block.\n" + "</notes>"
+            ),
+            prose=(
+                "Proin ut ligula vel nunc egestas porttitor. Morbi lectus risus, iaculis vel, "
+                + "suscipit quis, luctus non, massa. Fusce ac turpis quis ligula lacinia aliquet.\n\n"
+                + "Mauris ipsum. Nulla metus metus, ullamcorper vel, tincidunt sed, euismod in, nibh. "
+                + "Quisque volutpat condimentum velit."
+            ),
+        ),
+        encoding="utf-8",
+    )
+    created.append(nsfwCh2Path)
 
     return SiteInitResult(
         siteDir=targetDir,

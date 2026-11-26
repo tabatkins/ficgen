@@ -3,18 +3,42 @@
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import ao3fetch
 
 from . import t
 from .kdlMeta import StoryParseError, formatKdlListLine, formatKdlString
+from .markdownExt import stripHtmlTags
+from .models import ImportNsfwConfig
 from .scaffolder import resolveStorySlug
 
 _LOG: t.Final[logging.Logger] = logging.getLogger(__name__)
+_NEGATION_PREFIX_RE: t.Final[re.Pattern[str]] = re.compile(
+    r"(?:^|[\s(/,-])(?:no|not|non|without|zero)[\s-]+$",
+    re.IGNORECASE,
+)
+_CHAPTER_NSFW_MARKERS: t.Final[tuple[str, ...]] = (
+    "nsfw",
+    "smut",
+    "porn",
+    "erotica",
+    "explicit sexual content",
+    "sexual content",
+    "explicit content",
+    "adult content",
+    "18+",
+    "graphic violence",
+    "non-con",
+)
+_WARNING_ALIASES: t.Final[dict[str, str]] = {
+    "choose not to use archive warnings": "creator chose not to use archive warnings",
+    "underage": "underage sex",
+}
 
 
 @dataclass(slots=True)
@@ -26,6 +50,7 @@ class ImportOptions:
     slug: str = ""
     asDraft: bool = False
     force: bool = False
+    nsfwConfig: ImportNsfwConfig = field(default_factory=ImportNsfwConfig)
 
 
 @dataclass(slots=True)
@@ -43,6 +68,69 @@ class ImportResult:
 def htmlToMarkdown(html: str) -> str:
     """Convert AO3 HTML content (prose, summary, or notes) into clean Markdown."""
     return ao3fetch.toMarkdown(html)
+
+
+def _normalizeWarningName(value: str) -> str:
+    """Normalize an AO3 archive warning string for case- and alias-insensitive matching."""
+    lowered = value.strip().lower()
+    return _WARNING_ALIASES.get(lowered, lowered)
+
+
+def _matchesNsfwKeyword(text: str, keywords: t.Sequence[str]) -> bool:
+    """Return True if text contains any non-negated NSFW keyword."""
+    if not text or not keywords:
+        return False
+    for rawKeyword in keywords:
+        keyword = rawKeyword.strip()
+        if not keyword:
+            continue
+        pattern = re.compile(r"(?<![A-Za-z0-9])" + re.escape(keyword) + r"(?![A-Za-z0-9])", re.IGNORECASE)
+        for match in pattern.finditer(text):
+            if _NEGATION_PREFIX_RE.search(text[: match.start()]) is None:
+                return True
+    return False
+
+
+def detectWorkNsfw(
+    work: ao3fetch.WorkWithText | ao3fetch.DownloadedWork,
+    nsfwConfig: ImportNsfwConfig,
+) -> bool:
+    """Return True if an imported AO3 work's rating, warnings, or tags indicate NSFW content."""
+    if work.rating and nsfwConfig.ratings:
+        ratingSet = {rating.strip().lower() for rating in nsfwConfig.ratings if rating.strip()}
+        if work.rating.value.lower() in ratingSet:
+            return True
+
+    if work.tags.warnings and nsfwConfig.warnings:
+        warningSet = {_normalizeWarningName(warning) for warning in nsfwConfig.warnings if warning.strip()}
+        if any(_normalizeWarningName(warn.value) in warningSet for warn in work.tags.warnings):
+            return True
+
+    if nsfwConfig.tags and any(_matchesNsfwKeyword(tag, nsfwConfig.tags) for tag in work.tags.additional):
+        return True
+
+    return False
+
+
+def detectChapterNsfw(chapter: ao3fetch.ChapterText, nsfwConfig: ImportNsfwConfig) -> bool:
+    """Return True if a chapter's title, summary, or start notes indicate NSFW content."""
+    if not nsfwConfig.detectChapters:
+        return False
+
+    seen: set[str] = set()
+    keywords: list[str] = []
+    for kw in (*nsfwConfig.tags, *_CHAPTER_NSFW_MARKERS):
+        lowered = kw.strip().lower()
+        if lowered and lowered not in seen:
+            seen.add(lowered)
+            keywords.append(lowered)
+
+    candidates = (
+        chapter.title or "",
+        stripHtmlTags(chapter.summary or ""),
+        stripHtmlTags(chapter.notes.start or ""),
+    )
+    return any(_matchesNsfwKeyword(text, keywords) for text in candidates)
 
 
 def _formatAuthors(authors: tuple[ao3fetch.Author, ...]) -> str:
@@ -132,6 +220,8 @@ def _writeSingleDocWork(
         metaLines.append(f"updated {formatKdlString(work.updatedAt)}")
     if not work.complete:
         metaLines.append("complete false")
+    if detectWorkNsfw(work, options.nsfwConfig) or detectChapterNsfw(chapter, options.nsfwConfig):
+        metaLines.append("nsfw true")
     if options.asDraft:
         metaLines.append("published false")
 
@@ -157,6 +247,7 @@ def _writeMultiChapterWork(
     """Write a multi-chapter AO3 work to story.kdl and ch1.md..chN.md."""
     created: list[Path] = []
     chapters = work.content.chapters
+    workIsNsfw = detectWorkNsfw(work, options.nsfwConfig)
 
     storyMetaLines = [f"title {formatKdlString(work.title)}", *_buildSharedMetaLines(work)]
     storyMetaLines.append(f"complete {'true' if work.complete else 'false'}")
@@ -166,6 +257,8 @@ def _writeMultiChapterWork(
         storyMetaLines.append(f"date {formatKdlString(work.publishedAt)}")
     if not chapterDates and work.updatedAt and work.updatedAt != work.publishedAt:
         storyMetaLines.append(f"updated {formatKdlString(work.updatedAt)}")
+    if workIsNsfw:
+        storyMetaLines.append("nsfw true")
     if options.asDraft:
         storyMetaLines.append("published false")
 
@@ -189,6 +282,8 @@ def _writeMultiChapterWork(
             chDate = work.publishedAt
         if chDate:
             chMeta.append(f"date {formatKdlString(chDate)}")
+        if not workIsNsfw and detectChapterNsfw(chapter, options.nsfwConfig):
+            chMeta.append("nsfw true")
         if options.asDraft:
             chMeta.append("published false")
 
