@@ -1,6 +1,6 @@
 # ficgen
 
-A static site generator for personal fiction archives. Reads Markdown story documents and KDL metadata (`kdl-py`) from a `_stories/` directory and outputs clean, literary static HTML, CSS (with light/dark mode), static taxonomy browse pages, and an Atom 1.0 feed.
+An easy-to-use static site generator for personal fiction archives, both online and offline. (No comments or kudos, just text.) Reads Markdown story documents and KDL metadata (`kdl-py`) from a `_stories/` directory and outputs clean, literary static HTML, CSS (with light/dark mode), static taxonomy browse pages, and an Atom 1.0 feed.
 
 ## Installation
 
@@ -141,7 +141,7 @@ ficgen new "Quick Shot" --published --fandom "Original Work" --category "F/F" --
 
 ### Importing from AO3-Compatible Archives (`ficgen import`)
 
-Imports stories directly from AO3, any AO3-compatible archive (such as Superlove or SquidgeWorld), or local AO3 `.epub` downloads into `_stories/<slug>/` using [`ao3fetch`](https://github.com/tabatkins/ao3fetch):
+Imports stories directly from AO3, any AO3-compatible archive (such as [superlove](https://superlove.sayitditto.net/) or [SquidgeWorld](https://squidgeworld.org/)), or local AO3 `.epub` downloads into `_stories/<slug>/` using [`ao3fetch`](https://github.com/tabatkins/ao3fetch):
 
 ```sh
 ficgen import https://archiveofourown.org/works/123456
@@ -382,5 +382,5 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for coding conventions.
 
 ## Credits & License
 
-Created by Tab Atkins-Bittner (originally for [xanthir.com/fic](https://xanthir.com/fic/)).
+Created by Tab Atkins-Bittner (originally for [tabatkins.com/fic](https://tabatkins.com/fic/)).
 MIT License — see [LICENSE](LICENSE).
