@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>My Fiction Archive</title>
+  <subtitle>Original fiction and fanworks.</subtitle>
+  <id>https://tabatkins.github.io/ficgen/example/</id>
+  <link href="https://tabatkins.github.io/ficgen/example/" rel="alternate" type="text/html"/>
+  <link href="https://tabatkins.github.io/ficgen/example/feed.xml" rel="self" type="application/atom+xml"/>
+  <updated>2026-11-26T00:00:00Z</updated>
+  <generator>ficgen</generator>
+  <entry>
+    <title>Example Multi-Chapter Story — Chapter 2: Dolor Sit Amet</title>
+    <id>https://tabatkins.github.io/ficgen/example/example-multi-chapter/ch2.html</id>
+    <link href="https://tabatkins.github.io/ficgen/example/example-multi-chapter/ch2.html" rel="alternate" type="text/html"/>
+    <updated>2026-11-26T00:00:00Z</updated>
+    <published>2026-11-26T00:00:00Z</published>
+    <author>
+      <name>Your Name</name>
+    </author>
+    <category term="Original Work" label="Original Work"/>
+    <category term="F/F" label="F/F"/>
+    <category term="Character C/Character D" label="Character C/Character D"/>
+    <category term="Character C" label="Character C"/>
+    <category term="Character D" label="Character D"/>
+    <category term="Example" label="Example"/>
+    <category term="Multi-Chapter" label="Multi-Chapter"/>
+    <summary type="text">Class aptent taciti sociosqu ad litora torquent per conubia nostra, per inceptos himenaeos. Curabitur sodales ligula in libero. Sed dignissim lacinia nunc. Curabitur tortor. Pellentesque nibh. Aenean quam. In scelerisque sem at dolor.…</summary>
+    <content type="html">&lt;p&gt;Class aptent taciti sociosqu ad litora torquent per conubia nostra, per inceptos himenaeos. Curabitur sodales ligula in libero. Sed dignissim lacinia nunc.&lt;/p&gt;
+&lt;p&gt;Curabitur tortor. Pellentesque nibh. Aenean quam. In scelerisque sem at dolor. Maecenas mattis. Sed convallis tristique sem.&lt;/p&gt;</content>
+  </entry>
+  <entry>
+    <title>Example Multi-Chapter Story — Chapter 1: Lorem Ipsum</title>
+    <id>https://tabatkins.github.io/ficgen/example/example-multi-chapter/ch1.html</id>
+    <link href="https://tabatkins.github.io/ficgen/example/example-multi-chapter/ch1.html" rel="alternate" type="text/html"/>
+    <updated>2026-11-26T00:00:00Z</updated>
+    <published>2026-11-26T00:00:00Z</published>
+    <author>
+      <name>Your Name</name>
+    </author>
+    <category term="Original Work" label="Original Work"/>
+    <category term="F/F" label="F/F"/>
+    <category term="Character C/Character D" label="Character C/Character D"/>
+    <category term="Character C" label="Character C"/>
+    <category term="Character D" label="Character D"/>
+    <category term="Example" label="Example"/>
+    <category term="Multi-Chapter" label="Multi-Chapter"/>
+    <summary type="text">Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio. Praesent libero. Sed cursus ante dapibus diam. Sed nisi. Nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum. Praesent mauris. Fusce nec tellus sed…</summary>
+    <content type="html">&lt;p&gt;Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio. Praesent libero. Sed cursus ante dapibus diam. Sed nisi. Nulla quis sem at nibh elementum imperdiet.&lt;/p&gt;
+&lt;p&gt;Duis sagittis ipsum. Praesent mauris. Fusce nec tellus sed augue semper porta. Mauris massa. Vestibulum lacinia arcu eget nulla.&lt;/p&gt;</content>
+  </entry>
+  <entry>
+    <title>Example NSFW Story — Chapter 2: Full NSFW Chapter</title>
+    <id>https://tabatkins.github.io/ficgen/example/example-nsfw/ch2.html</id>
+    <link href="https://tabatkins.github.io/ficgen/example/example-nsfw/ch2.html" rel="alternate" type="text/html"/>
+    <updated>2026-11-26T00:00:00Z</updated>
+    <published>2026-11-26T00:00:00Z</published>
+    <author>
+      <name>Your Name</name>
+    </author>
+    <category term="Original Work" label="Original Work"/>
+    <category term="Gen" label="Gen"/>
+    <category term="Character E" label="Character E"/>
+    <category term="Character F" label="Character F"/>
+    <category term="Example" label="Example"/>
+    <category term="NSFW" label="NSFW"/>
+    <summary type="text">Proin ut ligula vel nunc egestas porttitor. Morbi lectus risus, iaculis vel, suscipit quis, luctus non, massa. Fusce ac turpis quis ligula lacinia aliquet. Mauris ipsum. Nulla metus metus, ullamcorper vel, tincidunt sed, euismod in, nibh.…</summary>
+    <content type="html">&lt;p&gt;Proin ut ligula vel nunc egestas porttitor. Morbi lectus risus, iaculis vel, suscipit quis, luctus non, massa. Fusce ac turpis quis ligula lacinia aliquet.&lt;/p&gt;
+&lt;p&gt;Mauris ipsum. Nulla metus metus, ullamcorper vel, tincidunt sed, euismod in, nibh. Quisque volutpat condimentum velit.&lt;/p&gt;</content>
+  </entry>
+  <entry>
+    <title>Example NSFW Story — Chapter 1: Inline NSFW Sections</title>
+    <id>https://tabatkins.github.io/ficgen/example/example-nsfw/ch1.html</id>
+    <link href="https://tabatkins.github.io/ficgen/example/example-nsfw/ch1.html" rel="alternate" type="text/html"/>
+    <updated>2026-11-26T00:00:00Z</updated>
+    <published>2026-11-26T00:00:00Z</published>
+    <author>
+      <name>Your Name</name>
+    </author>
+    <category term="Original Work" label="Original Work"/>
+    <category term="Gen" label="Gen"/>
+    <category term="Character E" label="Character E"/>
+    <category term="Character F" label="Character F"/>
+    <category term="Example" label="Example"/>
+    <category term="NSFW" label="NSFW"/>
+    <summary type="text">Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio. Praesent libero. Sed cursus ante dapibus diam. Sed nisi. Nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum. Praesent mauris. Fusce nec tellus sed…</summary>
+    <content type="html">&lt;p&gt;Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio. Praesent libero. Sed cursus ante dapibus diam.&lt;/p&gt;
+&lt;section class=&#34;nsfw-gate nsfw-section&#34; data-nsfw-gate=&#34;section&#34;&gt;
+&lt;noscript&gt;&lt;aside class=&#34;nsfw-warning&#34; role=&#34;note&#34; data-nsfw-ui&gt;&lt;strong&gt;NSFW Warning:&lt;/strong&gt; This section contains NSFW content.&lt;/aside&gt;&lt;/noscript&gt;
+&lt;div class=&#34;nsfw-content&#34;&gt;
+&lt;p&gt;Sed nisi. Nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum. Praesent mauris. Fusce nec tellus sed augue semper porta.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/section&gt;
+&lt;p&gt;Mauris massa. Vestibulum lacinia arcu eget nulla. Class aptent taciti sociosqu ad litora torquent per conubia nostra.&lt;/p&gt;
+&lt;section class=&#34;nsfw-gate nsfw-section&#34; data-nsfw-gate=&#34;section&#34; data-nsfw-reason=&#34;Example content warning&#34;&gt;
+&lt;noscript&gt;&lt;aside class=&#34;nsfw-warning&#34; role=&#34;note&#34; data-nsfw-ui&gt;&lt;strong&gt;NSFW Warning:&lt;/strong&gt; This section contains NSFW content (Example content warning).&lt;/aside&gt;&lt;/noscript&gt;
+&lt;div class=&#34;nsfw-content&#34;&gt;
+&lt;p&gt;Curabitur sodales ligula in libero. Sed dignissim lacinia nunc. Curabitur tortor. Pellentesque nibh.&lt;/p&gt;
+&lt;/div&gt;
+&lt;/section&gt;
+&lt;p&gt;Aenean quam. In scelerisque sem at dolor. Maecenas mattis. Sed convallis tristique sem.&lt;/p&gt;</content>
+  </entry>
+  <entry>
+    <title>Example One-Shot</title>
+    <id>https://tabatkins.github.io/ficgen/example/example-one-shot/</id>
+    <link href="https://tabatkins.github.io/ficgen/example/example-one-shot/" rel="alternate" type="text/html"/>
+    <updated>2026-11-26T00:00:00Z</updated>
+    <published>2026-11-26T00:00:00Z</published>
+    <author>
+      <name>Your Name</name>
+    </author>
+    <category term="Original Work" label="Original Work"/>
+    <category term="Gen" label="Gen"/>
+    <category term="Character A &amp; Character B" label="Character A &amp; Character B"/>
+    <category term="Character A" label="Character A"/>
+    <category term="Character B" label="Character B"/>
+    <category term="Example" label="Example"/>
+    <category term="One-Shot" label="One-Shot"/>
+    <summary type="text">Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</summary>
+    <content type="html">&lt;p&gt;Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.&lt;/p&gt;
+&lt;div class=&#34;chat&#34; role=&#34;region&#34; aria-label=&#34;Text messages&#34;&gt;
+&lt;p class=&#34;chat-msg chat-right&#34;&gt;Lorem ipsum?&lt;/p&gt;
+&lt;p class=&#34;chat-msg chat-left&#34;&gt;Dolor!&lt;/p&gt;
+&lt;p class=&#34;chat-msg chat-right&#34;&gt;sit amet…&lt;/p&gt;
+&lt;/div&gt;
+&lt;p&gt;Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.&lt;/p&gt;
+&lt;hr /&gt;
+&lt;p&gt;Curabitur pretium tincidunt lacus. Nulla gravida orci a odio. Nullam varius, turpis et commodo pharetra, est eros bibendum elit, nec luctus magna felis sollicitudin mauris.&lt;/p&gt;</content>
+  </entry>
+</feed>

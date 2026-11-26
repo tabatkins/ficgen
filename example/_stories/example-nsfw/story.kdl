@@ -1,0 +1,17 @@
+title "Example NSFW Story"
+fandoms "Original Work"
+categories "Gen"
+characters "Character E" "Character F"
+tags "Example" "NSFW"
+summary "Demonstrates inline <nsfw> blocks in Chapter 1 and a full NSFW chapter in Chapter 2 (all prose is placeholder Lorem Ipsum)."
+// author "Your Name"
+// rating "Mature"
+// warnings "No Archive Warnings Apply"
+// notes "Optional work-level top notes."
+// endnotes "Optional work-level end notes."
+// date "2026-11-26"
+// updated "2026-11-26"
+// published false
+// nsfw true  // uncomment to mark the entire work as NSFW
+// complete true
+// planned-chapters 2

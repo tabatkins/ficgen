@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en" data-nsfw-hide="1">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Example NSFW Story — My Fiction Archive</title>
+  <meta name="description" content="Demonstrates inline blocks in Chapter 1 and a full NSFW chapter in Chapter 2 (all prose is placeholder Lorem Ipsum).">
+  <link rel="alternate" type="application/atom+xml" title="My Fiction Archive Atom Feed" href="../feed.xml">
+  <link rel="stylesheet" href="../style.css">
+  <script>
+    (() => {
+      try {
+        const theme = localStorage.getItem("fic-theme");
+        if (theme === "light" || theme === "dark") {
+          document.documentElement.dataset.theme = theme;
+        }
+      } catch {}
+    })();
+  </script>
+  <script>
+    (() => {
+      const root = document.documentElement;
+      root.dataset.nsfwJs = "1";
+      const match = document.cookie.match(/(?:^|;\s*)ficgen_nsfw_site=([^;]*)/);
+      let allowSite = Boolean(match && decodeURIComponent(match[1]) === "1");
+      if (!allowSite && location.protocol === "file:") {
+        try { allowSite = localStorage.getItem("ficgen_nsfw_site") === "1"; } catch {}
+      }
+      if (allowSite) root.dataset.nsfwSite = "allow";
+    })();
+  </script>
+</head>
+<body class="page-story page-story-toc">
+  <a class="skip-link" href="#content">Skip to content</a>
+
+  <header class="site-header">
+    <div class="site-header-inner">
+      <a class="site-brand" href="../">My Fiction Archive</a>
+      <nav class="site-nav" aria-label="Primary">
+        <a href="../">Stories</a>
+        <a href="../browse/">Browse</a>
+        <a href="../feed.xml">Atom Feed</a>
+        <button type="button" class="theme-toggle" id="theme-toggle" hidden>Theme</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="site-main" id="content">
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <a href="../">&larr; All Stories</a>
+</nav>
+
+<article class="work">
+  <header class="work-header">
+    <h1>
+      Example NSFW Story
+<span class="badge badge-nsfw">Contains NSFW</span>    </h1>
+    <p class="work-byline">by Your Name</p>
+
+<dl class="story-meta">
+
+
+  <dt>Category</dt>
+  <dd>
+    <ul class="meta-inline-list">
+      <li><a class="badge badge-category" href="../browse/categories/gen.html">Gen</a></li>
+    </ul>
+  </dd>
+
+  <dt>Fandoms</dt>
+  <dd>
+    <ul class="meta-inline-list">
+      <li><a class="tag-pill tag-character" href="../browse/fandoms/original-work.html">Original Work</a></li>
+    </ul>
+  </dd>
+
+
+  <dt>Characters</dt>
+  <dd>
+    <ul class="meta-inline-list">
+      <li><a class="tag-pill tag-character" href="../browse/characters/character-e.html">Character E</a></li>
+      <li><a class="tag-pill tag-character" href="../browse/characters/character-f.html">Character F</a></li>
+    </ul>
+  </dd>
+
+  <dt>Additional Tags</dt>
+  <dd>
+    <ul class="meta-inline-list">
+      <li><a class="tag-pill tag-freeform" href="../browse/tags/example.html">Example</a></li>
+      <li><a class="tag-pill tag-freeform" href="../browse/tags/nsfw.html">NSFW</a></li>
+    </ul>
+  </dd>
+
+  <dt>Stats</dt>
+  <dd class="meta-stats-row">
+    <span><strong>Words:</strong> 122</span>
+    <span><strong>Chapters:</strong> 2/?</span>
+    <span><strong>Status:</strong> In Progress</span>
+    <span><strong>Published:</strong> <time datetime="2026-11-26">2026-11-26</time></span>
+  </dd>
+</dl>
+    <section class="work-summary" aria-labelledby="summary-heading">
+      <h2 id="summary-heading">Summary</h2>
+      <p>Demonstrates inline <nsfw> blocks in Chapter 1 and a full NSFW chapter in Chapter 2 (all prose is placeholder Lorem Ipsum).</p>
+    </section>
+
+
+    <div class="work-actions">
+      <a class="btn btn-primary" href="ch1.html">Start Reading (Chapter 1: Inline NSFW Sections)</a>
+      <a class="btn" href="all.html">Read Entire Work</a>
+    </div>
+  </header>
+
+  <section class="chapter-index" aria-labelledby="chapters-heading">
+    <h2 id="chapters-heading">Chapters</h2>
+    <ol class="chapter-list">
+      <li>
+        <div class="chapter-list-row">
+          <a class="chapter-list-title" href="ch1.html">
+            Chapter 1: Inline NSFW Sections
+<span class="badge badge-nsfw">Contains NSFW</span>          </a>
+          <span class="chapter-list-meta">
+            82 words &middot; <time datetime="2026-11-26">2026-11-26</time>          </span>
+        </div>
+      </li>
+      <li>
+        <div class="chapter-list-row">
+          <a class="chapter-list-title" href="ch2.html">
+            Chapter 2: Full NSFW Chapter
+<span class="badge badge-nsfw">NSFW</span>          </a>
+          <span class="chapter-list-meta">
+            40 words &middot; <time datetime="2026-11-26">2026-11-26</time>          </span>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+</article>
+
+<nav class="work-footer-nav" aria-label="Story footer">
+  <a href="../">&larr; Back to Archive</a>
+  <a href="all.html">Entire Work</a>
+</nav>
+  </main>
+
+  <footer class="site-footer">
+    <div class="site-footer-inner">
+      <p>My Fiction Archive &middot; Your Name</p>
+      <p>
+        <a href="../">Stories</a> &middot;
+        <a href="../browse/">Browse Tags</a> &middot;
+        <a href="../feed.xml">Atom Feed</a><span id="nsfw-reset-sep" hidden> &middot; </span><button type="button" class="nsfw-reset" id="nsfw-reset" hidden>Re-hide NSFW</button>      </p>
+    </div>
+  </footer>
+
+  <script>
+    (() => {
+      const btn = document.getElementById("theme-toggle");
+      if (!btn) return;
+      const root = document.documentElement;
+      const mq = window.matchMedia("(prefers-color-scheme: dark)");
+      const currentTheme = () => root.dataset.theme || (mq.matches ? "dark" : "light");
+      const sync = () => {
+        const theme = currentTheme();
+        btn.textContent = theme === "dark" ? "Light" : "Dark";
+        btn.setAttribute("aria-label", "Switch to " + (theme === "dark" ? "light" : "dark") + " mode");
+      };
+      btn.hidden = false;
+      sync();
+      btn.addEventListener("click", () => {
+        const next = currentTheme() === "dark" ? "light" : "dark";
+        root.dataset.theme = next;
+        try { localStorage.setItem("fic-theme", next); } catch {}
+        sync();
+      });
+    })();
+  </script>
+  <script>
+    (() => {
+      const SITE_KEY = "ficgen_nsfw_site";
+      const ALLOW_KEY = "ficgen_nsfw_allow";
+      const root = document.documentElement;
+      const isFile = location.protocol === "file:";
+      const cookiePath = isFile ? "/" : new URL("../", location.href).pathname;
+
+      const readCookie = (name) => {
+        const prefix = name + "=";
+        for (const part of document.cookie.split(";")) {
+          const trimmed = part.trim();
+          if (trimmed.startsWith(prefix)) return decodeURIComponent(trimmed.slice(prefix.length));
+        }
+        return "";
+      };
+
+      const readPref = (name) => {
+        const val = readCookie(name);
+        if (val || !isFile) return val;
+        try { return localStorage.getItem(name) || ""; } catch { return ""; }
+      };
+
+      const writePref = (name, value) => {
+        document.cookie = name + "=" + encodeURIComponent(value) + "; path=" + cookiePath + "; max-age=31536000; SameSite=Lax";
+        if (isFile) {
+          try { localStorage.setItem(name, value); } catch {}
+        }
+      };
+
+      const clearPref = (name) => {
+        document.cookie = name + "=; path=" + cookiePath + "; max-age=0; SameSite=Lax";
+        if (isFile) {
+          try { localStorage.removeItem(name); } catch {}
+        }
+      };
+
+      let siteAllowed = readPref(SITE_KEY) === "1";
+      const allowSet = new Set(readPref(ALLOW_KEY).split(",").filter(Boolean));
+      const resetBtn = document.getElementById("nsfw-reset");
+      const resetSep = document.getElementById("nsfw-reset-sep");
+
+      const allGates = Array.from(document.querySelectorAll(".nsfw-gate"));
+      const gates = [];
+      for (const gate of allGates) {
+        if (gate.parentElement && gate.parentElement.closest(".nsfw-gate")) {
+          gate.dataset.nsfwRevealed = "1";
+        } else {
+          gates.push(gate);
+        }
+      }
+
+      const gateScope = (gate) => {
+        const kind = gate.dataset.nsfwGate || "section";
+        const work = gate.dataset.nsfwWork || gate.closest("[data-nsfw-work]")?.dataset.nsfwWork || "";
+        const chapter = gate.dataset.nsfwChapter || gate.closest("[data-nsfw-chapter]")?.dataset.nsfwChapter || "";
+        return { kind, work, chapter };
+      };
+
+      const isAllowed = (gate) => {
+        if (siteAllowed) return true;
+        const { work, chapter } = gateScope(gate);
+        if (work && allowSet.has("work:" + work)) return true;
+        if (chapter && allowSet.has("chapter:" + chapter)) return true;
+        return false;
+      };
+
+      const permanentChoice = (gate) => {
+        const { kind, work, chapter } = gateScope(gate);
+        if (kind === "work" && work) return { key: "work:" + work, label: "Always show this work" };
+        if (kind === "chapter" && chapter) return { key: "chapter:" + chapter, label: "Always show this chapter" };
+        if (chapter) return { key: "chapter:" + chapter, label: "Always show for this chapter" };
+        if (work) return { key: "work:" + work, label: "Always show for this work" };
+        return { key: "", label: "" };
+      };
+
+      const makeButton = (label, primary, onClick) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = primary ? "btn btn-primary" : "btn";
+        btn.textContent = label;
+        btn.addEventListener("click", onClick);
+        return btn;
+      };
+
+      const buildDialog = (gate) => {
+        const { kind } = gateScope(gate);
+        const reason = gate.dataset.nsfwReason || "";
+        const titleMap = { work: "NSFW Work", chapter: "NSFW Chapter", section: "NSFW Section" };
+        const dlg = document.createElement("dialog");
+        dlg.open = true;
+        dlg.className = "nsfw-dialog";
+        dlg.dataset.nsfwUi = "";
+        dlg.setAttribute("aria-label", titleMap[kind] || "NSFW Content");
+
+        const heading = document.createElement("p");
+        heading.className = "nsfw-dialog-title";
+        heading.textContent = titleMap[kind] || "NSFW Content";
+        dlg.appendChild(heading);
+
+        const msg = document.createElement("p");
+        msg.className = "nsfw-dialog-message";
+        msg.textContent = "This " + kind + " contains NSFW content" + (reason ? " (" + reason + ")" : "") + ". Would you like to display it?";
+        dlg.appendChild(msg);
+
+        const actions = document.createElement("div");
+        actions.className = "nsfw-dialog-actions";
+        actions.appendChild(makeButton("Show once", true, () => {
+          gate.dataset.nsfwRevealed = "1";
+          dlg.remove();
+        }));
+
+        const choice = permanentChoice(gate);
+        if (choice.key) {
+          actions.appendChild(makeButton(choice.label, false, () => {
+            allowSet.add(choice.key);
+            writePref(ALLOW_KEY, Array.from(allowSet).join(","));
+            sync();
+          }));
+        }
+
+        actions.appendChild(makeButton("Always show NSFW on this site", false, () => {
+          siteAllowed = true;
+          root.dataset.nsfwSite = "allow";
+          writePref(SITE_KEY, "1");
+          sync();
+        }));
+
+        dlg.appendChild(actions);
+        return dlg;
+      };
+
+      const sync = () => {
+        for (const gate of gates) {
+          const existing = gate.querySelector(":scope > .nsfw-dialog");
+          if (isAllowed(gate)) {
+            gate.dataset.nsfwRevealed = "1";
+            if (existing) existing.remove();
+          } else if (gate.dataset.nsfwRevealed !== "1" && !existing) {
+            gate.insertBefore(buildDialog(gate), gate.firstChild);
+          }
+        }
+        const hasPrefs = siteAllowed || allowSet.size > 0;
+        if (resetBtn) resetBtn.hidden = !hasPrefs;
+        if (resetSep) resetSep.hidden = !hasPrefs;
+      };
+
+      if (resetBtn) {
+        resetBtn.addEventListener("click", () => {
+          clearPref(SITE_KEY);
+          clearPref(ALLOW_KEY);
+          siteAllowed = false;
+          allowSet.clear();
+          delete root.dataset.nsfwSite;
+          for (const gate of gates) delete gate.dataset.nsfwRevealed;
+          sync();
+        });
+      }
+
+      sync();
+    })();
+  </script>
+  <script>
+    if (location.protocol === "file:") {
+      for (const a of document.querySelectorAll("a[href]")) {
+        const href = a.getAttribute("href");
+        if (!href || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(href)) continue;
+        const rewritten = href
+          .replace(/^([^?#]*\/)(?=[?#]|$)/, "$1index.html")
+          .replace(/^([^?#]*(?:^|\/)\.\.?)(?=[?#]|$)/, "$1/index.html");
+        if (rewritten !== href) a.setAttribute("href", rewritten);
+      }
+    }
+  </script>
+</body>
+</html>

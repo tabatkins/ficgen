@@ -1,0 +1,18 @@
+title "My Fiction Archive"
+subtitle "Original fiction and fanworks."
+author "Your Name"
+base-url "https://tabatkins.github.io/ficgen/example/"
+// stories "_stories"
+// include-drafts false
+// local-browsing true
+// hide-nsfw true  // hide NSFW works/chapters/sections behind a confirmation dialog (or false to show normally)
+// import-nsfw {
+//     ratings "Explicit" "Mature" "Not Rated"
+//     warnings "Rape/Non-Con" "Underage Sex" "Graphic Depictions Of Violence"
+//     tags true
+//     chapters true
+// }
+// font-serif "old-style"    // presets: old-style, transitional, slab-serif, antique, didone (or custom CSS font stack)
+// font-sans "neogrotesque"  // presets: neogrotesque, system-ui, humanist, geometric-humanist, classical-humanist, industrial, rounded-sans, handwritten
+// font-mono "mono-code"     // presets: mono-code, mono-slab-serif (or custom CSS font stack)
+// css "site.css" mode="append"  // optional custom CSS (auto-loaded if site.css exists); mode: "append" or "replace"
