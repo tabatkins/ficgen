@@ -103,6 +103,9 @@ def test_init_rejects_duplicate_dir_and_bad_inputs(tmp_path: Path) -> None:
     with pytest.raises(StoryParseError, match="Invalid story slug"):
         initStory(InitOptions(storiesDir=storiesDir, title="Bad", slug="../escape"))
 
+    with pytest.raises(StoryParseError, match="reserved site output path"):
+        initStory(InitOptions(storiesDir=storiesDir, title="Browse"))
+
     with pytest.raises(StoryParseError, match="Chapter count"):
         initStory(InitOptions(storiesDir=storiesDir, title="Zero", chapterCount=0))
 

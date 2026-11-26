@@ -14,7 +14,7 @@ from jinja2 import Environment, PackageLoader, select_autoescape
 from . import t
 from .css import buildSiteStylesheet, buildStoryPageCss
 from .kdlMeta import StoryParseError, readUtf8File
-from .models import TAXONOMY_SPECS, Archive, SiteConfig, Story, TaxonomyBucket
+from .models import RESERVED_OUTPUT_SLUGS, TAXONOMY_SPECS, Archive, SiteConfig, Story, TaxonomyBucket
 
 
 @dataclass(slots=True)
@@ -255,6 +255,15 @@ def _renderAtomFeed(
 def generateSite(archive: Archive) -> BuildResult:
     """Render the complete static fiction archive into archive.config.outputDir."""
     outputDir = archive.config.outputDir
+    for slug in archive.allStorySlugs:
+        if slug.lower() in RESERVED_OUTPUT_SLUGS:
+            msg = f"Story slug {slug!r} conflicts with a reserved site output path. Rename the story directory."
+            raise StoryParseError(msg)
+    for story in archive.stories:
+        if story.slug.lower() in RESERVED_OUTPUT_SLUGS:
+            msg = f"Story slug {story.slug!r} conflicts with a reserved site output path. Rename the story directory."
+            raise StoryParseError(msg)
+
     outputDir.mkdir(parents=True, exist_ok=True)
     env = _createJinjaEnv()
     written: list[Path] = []

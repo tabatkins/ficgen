@@ -972,3 +972,37 @@ def test_nsfw_gating_noscript_warnings_and_site_kdl_display_toggle(
     cfgPath.write_text('nsfw "bogus"\n', encoding="utf-8")
     assert main(["build", "--stories", str(storiesDir), "--output", str(outShown), "--config", str(cfgPath)]) == 1
     assert "Invalid NSFW display mode" in capsys.readouterr().err
+
+
+def test_build_rejects_story_slug_conflicting_with_generated_site_paths(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`ficgen build` fails before writing output if any story slug conflicts with generated paths like `browse`."""
+    for reservedName in ("browse", "Browse", "style.css"):
+        caseDir = tmp_path / f"case-{reservedName}"
+        storiesDir = caseDir / "_stories"
+        conflictDir = storiesDir / reservedName
+        conflictDir.mkdir(parents=True)
+        (conflictDir / "index.md").write_text(
+            '# Conflicting Story\n\n```metadata\ndate "2026-10-01"\n```\n\nBody.\n',
+            encoding="utf-8",
+        )
+        outDir = caseDir / "out"
+        assert main(["build", "--stories", str(storiesDir), "--output", str(outDir)]) == 1
+        assert "reserved site output path" in capsys.readouterr().err
+        assert not outDir.exists()
+
+    # Even an unpublished draft folder named `browse` is rejected so cleaning cannot clobber `browse/`.
+    draftCase = tmp_path / "case-draft-browse"
+    draftStories = draftCase / "_stories"
+    draftBrowse = draftStories / "browse"
+    draftBrowse.mkdir(parents=True)
+    (draftBrowse / "index.md").write_text(
+        "# Draft Browse\n\n```metadata\npublished false\n```\n\nBody.\n",
+        encoding="utf-8",
+    )
+    draftOut = draftCase / "out"
+    assert main(["build", "--stories", str(draftStories), "--output", str(draftOut)]) == 1
+    assert "reserved site output path" in capsys.readouterr().err
+    assert not draftOut.exists()

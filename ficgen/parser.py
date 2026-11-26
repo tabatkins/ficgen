@@ -27,6 +27,7 @@ from .kdlMeta import (
 )
 from .markdownExt import MarkdownRenderer, countWords, makeExcerpt, stripHtmlTags
 from .models import (
+    RESERVED_OUTPUT_SLUGS,
     TAXONOMY_SPECS,
     Archive,
     Chapter,
@@ -856,9 +857,29 @@ def _warnUndatedStories(stories: tuple[Story, ...]) -> None:
         _LOG.warning("Run `ficgen stamp` to add date metadata to undated published files.")
 
 
+def _validateStorySlugs(storyDirs: t.Sequence[Path], config: SiteConfig) -> None:
+    """Reject story slugs that collide with generated site folders/files or the stories directory itself."""
+    resolvedStoriesDir = config.storiesDir.resolve()
+    for storyDir in storyDirs:
+        slug = storyDir.name
+        if slug.lower() in RESERVED_OUTPUT_SLUGS:
+            msg = (
+                f"Story slug {slug!r} ({storyDir}) conflicts with a reserved site output path. "
+                + "Rename the story directory."
+            )
+            raise StoryParseError(msg)
+        if (config.outputDir / slug).resolve() == resolvedStoriesDir:
+            msg = (
+                f"Story slug {slug!r} ({storyDir}) conflicts with the stories source directory "
+                + f"{config.storiesDir}. Rename the story directory."
+            )
+            raise StoryParseError(msg)
+
+
 def loadArchive(config: SiteConfig) -> Archive:
     """Scan storiesDir and construct a fully indexed Archive."""
     storyDirs = discoverStoryDirs(config.storiesDir)
+    _validateStorySlugs(storyDirs, config)
     renderer = MarkdownRenderer(hideNsfw=config.hideNsfw)
 
     allStorySlugs = tuple(storyDir.name for storyDir in storyDirs)

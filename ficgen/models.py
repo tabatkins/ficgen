@@ -21,6 +21,14 @@ from .css import (
 )
 
 DEFAULT_STORIES_DIR_NAME: t.Final[str] = "_stories"
+RESERVED_OUTPUT_SLUGS: t.Final[frozenset[str]] = frozenset(
+    {
+        "browse",
+        "feed.xml",
+        "index.html",
+        "style.css",
+    },
+)
 
 DEFAULT_NSFW_RATINGS: t.Final[tuple[str, ...]] = (
     "Explicit",
@@ -63,6 +71,7 @@ __all__ = [
     "DEFAULT_SERIF_FONT",
     "DEFAULT_STORIES_DIR_NAME",
     "FONT_PRESETS",
+    "RESERVED_OUTPUT_SLUGS",
     "TAXONOMY_SPECS",
     "Archive",
     "Chapter",

@@ -14,6 +14,7 @@ from .models import (
     DEFAULT_SANS_FONT,
     DEFAULT_SERIF_FONT,
     DEFAULT_STORIES_DIR_NAME,
+    RESERVED_OUTPUT_SLUGS,
     slugify,
 )
 from .stamper import defaultTodayDate, validateDateString
@@ -82,6 +83,11 @@ def resolveStorySlug(title: str, explicitSlug: str) -> str:
         msg = (
             f"Invalid story slug {slug!r}: must start with a lowercase letter or digit "
             + "and contain only lowercase letters, digits, and hyphens."
+        )
+        raise StoryParseError(msg)
+    if slug.lower() in RESERVED_OUTPUT_SLUGS:
+        msg = (
+            f"Invalid story slug {slug!r}: conflicts with a reserved site output path (pass --slug to choose another)."
         )
         raise StoryParseError(msg)
     return slug
