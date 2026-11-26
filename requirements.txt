@@ -1,4 +1,4 @@
-ao3py>=0.1.0
+ao3fetch>=0.1.0
 jinja2>=3.1
 kdl-py>=1.2
 linkify-it-py>=2.0

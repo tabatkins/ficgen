@@ -7,7 +7,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-import ao3py
+import ao3fetch
 import kdl
 
 from . import t
@@ -22,7 +22,7 @@ class ImportOptions:
     """Configuration for importing a work into a stories/ directory."""
 
     storiesDir: Path
-    archiveUrl: str = ao3py.DEFAULT_BASE_URL
+    archiveUrl: str = ao3fetch.DEFAULT_BASE_URL
     slug: str = ""
     asDraft: bool = False
     force: bool = False
@@ -42,7 +42,7 @@ class ImportResult:
 
 def htmlToMarkdown(html: str) -> str:
     """Convert AO3 HTML content (prose, summary, or notes) into clean Markdown."""
-    return ao3py.toMarkdown(html)
+    return ao3fetch.toMarkdown(html)
 
 
 def _formatKdlStr(value: str) -> str:
@@ -57,7 +57,7 @@ def _formatKdlList(nodeName: str, values: t.Sequence[str]) -> str | None:
     return f"{nodeName} {args}"
 
 
-def _formatAuthors(authors: tuple[ao3py.Author, ...]) -> str:
+def _formatAuthors(authors: tuple[ao3fetch.Author, ...]) -> str:
     formatted: list[str] = []
     for author in authors:
         if author.anonymous:
@@ -69,7 +69,7 @@ def _formatAuthors(authors: tuple[ao3py.Author, ...]) -> str:
     return ", ".join(formatted)
 
 
-def _buildSharedMetaLines(work: ao3py.WorkWithText | ao3py.DownloadedWork) -> list[str]:
+def _buildSharedMetaLines(work: ao3fetch.WorkWithText | ao3fetch.DownloadedWork) -> list[str]:
     """Build KDL metadata lines common to one-shot index.md and multi-chapter story.kdl."""
     lines: list[str] = []
     authorStr = _formatAuthors(work.authors)
@@ -127,7 +127,7 @@ def _buildMarkdownBlocks(
 
 
 def writeImportedWork(
-    work: ao3py.WorkWithText | ao3py.DownloadedWork,
+    work: ao3fetch.WorkWithText | ao3fetch.DownloadedWork,
     options: ImportOptions,
     *,
     chapterDates: t.Mapping[int, str] | None = None,
@@ -228,11 +228,11 @@ def writeImportedWork(
     )
 
 
-def _fetchChapterDatesSafe(workId: ao3py.ArchiveId) -> dict[int, str]:
+def _fetchChapterDatesSafe(workId: ao3fetch.ArchiveId) -> dict[int, str]:
     """Best-effort fetch of per-chapter publication dates from /works/<id>/navigate."""
     try:
-        indexData = ao3py.getWorkWithChapters(workId)
-    except (ao3py.ArchivePageRequestError, ValueError, OSError) as exc:
+        indexData = ao3fetch.getWorkWithChapters(workId)
+    except (ao3fetch.ArchivePageRequestError, ValueError, OSError) as exc:
         _LOG.warning("Could not load chapter dates from /navigate for work %s: %s", workId, exc)
         return {}
     return {chapter.index: chapter.publishedAt for chapter in indexData.chapters if chapter.publishedAt}
@@ -243,19 +243,19 @@ def importFromSource(source: str, options: ImportOptions) -> ImportResult:
     localPath = Path(source)
     if localPath.is_file() and localPath.suffix.lower() == ".epub":
         try:
-            downloaded = ao3py.parseEpubWork(localPath.read_bytes(), filePath=str(localPath))
+            downloaded = ao3fetch.parseEpubWork(localPath.read_bytes(), filePath=str(localPath))
         except ValueError as exc:
             msg = f"Failed to parse EPUB {localPath}: {exc}"
             raise StoryParseError(msg) from exc
         return writeImportedWork(downloaded, options)
 
     targetBaseUrl = options.archiveUrl
-    if ao3py.isValidArchiveId(source):
-        workId = ao3py.parseArchiveId(source)
+    if ao3fetch.isValidArchiveId(source):
+        workId = ao3fetch.parseArchiveId(source)
     elif "/works/" in source or source.startswith(("http://", "https://")):
         try:
-            parsed = ao3py.getWorkDetailsFromUrl(source)
-        except (ValueError, ao3py.InvalidIDError) as exc:
+            parsed = ao3fetch.getWorkDetailsFromUrl(source)
+        except (ValueError, ao3fetch.InvalidIDError) as exc:
             msg = f"Could not parse archive work URL {source!r}: {exc}"
             raise StoryParseError(msg) from exc
         workId = parsed.workId
@@ -265,16 +265,16 @@ def importFromSource(source: str, options: ImportOptions) -> ImportResult:
         msg = f"Expected an AO3 work URL, numeric work ID, or .epub file path, got: {source!r}"
         raise StoryParseError(msg)
 
-    previousBaseUrl = ao3py.getArchiveBaseUrl()
-    ao3py.setArchiveBaseUrl(targetBaseUrl)
+    previousBaseUrl = ao3fetch.getArchiveBaseUrl()
+    ao3fetch.setArchiveBaseUrl(targetBaseUrl)
     try:
         try:
-            work = ao3py.getWorkContent(workId, fullWork=True)
-        except (ao3py.ArchivePageRequestError, ao3py.InvalidIDError, ValueError, OSError) as exc:
+            work = ao3fetch.getWorkContent(workId, fullWork=True)
+        except (ao3fetch.ArchivePageRequestError, ao3fetch.InvalidIDError, ValueError, OSError) as exc:
             msg = f"Failed to fetch work {workId} from {targetBaseUrl}: {exc}"
             raise StoryParseError(msg) from exc
 
-        if isinstance(work, ao3py.LockedWorkSummary):
+        if isinstance(work, ao3fetch.LockedWorkSummary):
             msg = (
                 f"Work {work.url} is restricted to logged-in users. "
                 + "Pass --cookie with a session cookie or download its EPUB and run `ficgen import <file.epub>`."
@@ -287,4 +287,4 @@ def importFromSource(source: str, options: ImportOptions) -> ImportResult:
 
         return writeImportedWork(work, options, chapterDates=chapterDates)
     finally:
-        ao3py.setArchiveBaseUrl(previousBaseUrl)
+        ao3fetch.setArchiveBaseUrl(previousBaseUrl)

@@ -7,7 +7,7 @@ import logging
 import sys
 from pathlib import Path
 
-import ao3py
+import ao3fetch
 import kdl
 
 from . import t
@@ -252,8 +252,8 @@ def _importArgParser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--archive",
         type=str,
-        default=ao3py.DEFAULT_BASE_URL,
-        help=f"Archive base URL for bare numeric work IDs (default: {ao3py.DEFAULT_BASE_URL}).",
+        default=ao3fetch.DEFAULT_BASE_URL,
+        help=f"Archive base URL for bare numeric work IDs (default: {ao3fetch.DEFAULT_BASE_URL}).",
     )
     parser.add_argument(
         "--slug",
@@ -395,10 +395,10 @@ def _runNew(argv: t.Sequence[str]) -> int:
     return 0
 
 
-def _makeCookieFetcher(baseFetcher: ao3py.Fetcher, extraCookie: str) -> ao3py.Fetcher:
+def _makeCookieFetcher(baseFetcher: ao3fetch.Fetcher, extraCookie: str) -> ao3fetch.Fetcher:
     """Return a fetcher that appends an extra Cookie header to every request."""
 
-    def _wrapped(url: str, headers: t.Mapping[str, str] | None = None) -> ao3py.FetchResponse:
+    def _wrapped(url: str, headers: t.Mapping[str, str] | None = None) -> ao3fetch.FetchResponse:
         merged = dict(headers) if headers else {}
         existing = merged.get("Cookie", "").strip()
         merged["Cookie"] = f"{existing} {extraCookie}".strip() if existing else extraCookie
@@ -416,14 +416,14 @@ def _runImport(argv: t.Sequence[str]) -> int:
         raise StoryParseError(msg)
 
     logger = logging.getLogger("ficgen.importer")
-    previousFetcher = ao3py.getFetcher()
+    previousFetcher = ao3fetch.getFetcher()
     installedCustom = False
-    if previousFetcher is ao3py.defaultFetch or args.cookie:
-        base: ao3py.Fetcher = previousFetcher
+    if previousFetcher is ao3fetch.defaultFetch or args.cookie:
+        base: ao3fetch.Fetcher = previousFetcher
         if args.cookie:
             base = _makeCookieFetcher(base, args.cookie)
 
-        def _logRetry(event: ao3py.RetryEvent) -> None:
+        def _logRetry(event: ao3fetch.RetryEvent) -> None:
             statusDesc = f"HTTP {event.response.status}" if event.response is not None else str(event.error)
             logger.warning(
                 "Retry %d in %.1fs after %s",
@@ -432,7 +432,7 @@ def _runImport(argv: t.Sequence[str]) -> int:
                 statusDesc,
             )
 
-        ao3py.setFetcher(ao3py.withCache(ao3py.withRetry(base, onRetry=_logRetry)))
+        ao3fetch.setFetcher(ao3fetch.withCache(ao3fetch.withRetry(base, onRetry=_logRetry)))
         installedCustom = True
 
     try:
@@ -451,10 +451,10 @@ def _runImport(argv: t.Sequence[str]) -> int:
                 print(f"  {createdPath}")
     finally:
         if installedCustom:
-            if previousFetcher is ao3py.defaultFetch:
-                ao3py.resetFetcher()
+            if previousFetcher is ao3fetch.defaultFetch:
+                ao3fetch.resetFetcher()
             else:
-                ao3py.setFetcher(previousFetcher)
+                ao3fetch.setFetcher(previousFetcher)
 
     return 0
 

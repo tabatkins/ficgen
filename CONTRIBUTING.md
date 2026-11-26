@@ -30,7 +30,7 @@ Naming
 Style, Formatting & Linting
 ---------------------------
 
-All code across the repository (`ficgen/`, `tests/`, and root scripts) must pass `./lint` cleanly (`ruff`, `black`, `mypy`, `pylint` at 10/10, and `check-manifest`):
+All code across the repository (`ficgen/` and `tests/`) must pass `./lint` cleanly (`ruff`, `black`, `mypy`, `pylint` at 10/10, and `check-manifest`):
 
 * **Formatting:** `black` with a **120-character** line length, and trailing commas on multiline calls/collections (`COM812`).
 * **String concatenation:** Always use explicit `+` across lines rather than implicit multiline string concatenation (`ISC002`).

@@ -108,7 +108,7 @@ ficgen init "Alias Example" --slug custom-slug                  # `init` is an a
 
 ### Importing from AO3-Compatible Archives (`ficgen import`)
 
-Imports stories directly from AO3, any AO3-compatible archive (such as Superlove or SquidgeWorld), or local AO3 `.epub` downloads into `stories/<slug>/` using [`ao3py`](https://github.com/tabatkins/ao3py):
+Imports stories directly from AO3, any AO3-compatible archive (such as Superlove or SquidgeWorld), or local AO3 `.epub` downloads into `stories/<slug>/` using [`ao3fetch`](https://github.com/tabatkins/ao3fetch):
 
 ```sh
 ficgen import https://archiveofourown.org/works/123456

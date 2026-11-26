@@ -7,7 +7,7 @@ import zipfile
 from collections.abc import Mapping
 from pathlib import Path
 
-import ao3py
+import ao3fetch
 
 from ficgen.cli import main
 from ficgen.generator import generateSite
@@ -115,12 +115,12 @@ _WORK_NAVIGATE_HTML = """<!DOCTYPE html>
 _WORK_LOCKED_HTML = '<html><body><div id="signin"><h3 class="heading">Log In</h3></div></body></html>'
 
 
-def _makeRouteFetcher(routes: dict[str, tuple[int, str]]) -> ao3py.Fetcher:
-    def _fetch(url: str, _headers: Mapping[str, str] | None = None) -> ao3py.FetchResponse:
+def _makeRouteFetcher(routes: dict[str, tuple[int, str]]) -> ao3fetch.Fetcher:
+    def _fetch(url: str, _headers: Mapping[str, str] | None = None) -> ao3fetch.FetchResponse:
         if url in routes:
             status, body = routes[url]
-            return ao3py.FetchResponse(status=status, headers={}, body=body.encode("utf-8"), url=url)
-        return ao3py.FetchResponse(status=404, headers={}, body=b"Not Found", url=url)
+            return ao3fetch.FetchResponse(status=status, headers={}, body=body.encode("utf-8"), url=url)
+        return ao3fetch.FetchResponse(status=404, headers={}, body=b"Not Found", url=url)
 
     return _fetch
 
@@ -160,7 +160,7 @@ def _buildTestEpub() -> bytes:
 
 
 def test_html_to_markdown_roundtrips_with_ficgen_renderer() -> None:
-    """htmlToMarkdown delegates to ao3py.toMarkdown and round-trips headings cleanly with MarkdownRenderer."""
+    """htmlToMarkdown delegates to ao3fetch.toMarkdown and round-trips headings cleanly with MarkdownRenderer."""
     renderer = MarkdownRenderer()
     h2Md = htmlToMarkdown("<p>Waking<br />\n------</p>\n<p>Ithari wakes.</p>")
     assert h2Md == "Waking\n------\n\nIthari wakes."
@@ -177,12 +177,12 @@ def test_import_single_doc_from_superlove_and_build(tmp_path: Path) -> None:
     storiesDir = tmp_path / "stories"
     outDir = tmp_path / "out"
 
-    ao3py.setFetcher(_makeRouteFetcher(routes))
+    ao3fetch.setFetcher(_makeRouteFetcher(routes))
     try:
         code = main(["import", "https://superlove.sayitditto.net/works/1269", "--stories", str(storiesDir)])
     finally:
-        ao3py.resetFetcher()
-        ao3py.resetArchiveBaseUrl()
+        ao3fetch.resetFetcher()
+        ao3fetch.resetArchiveBaseUrl()
 
     assert code == 0
     indexMd = storiesDir / "and-she-burned-the-sky" / "index.md"
@@ -214,12 +214,12 @@ def test_import_multichapter_work_creates_story_kdl_and_chapter_dates(tmp_path: 
     storiesDir = tmp_path / "stories"
     outDir = tmp_path / "out"
 
-    ao3py.setFetcher(_makeRouteFetcher(routes))
+    ao3fetch.setFetcher(_makeRouteFetcher(routes))
     try:
         code = main(["import", "https://archiveofourown.org/works/555", "--stories", str(storiesDir)])
     finally:
-        ao3py.resetFetcher()
-        ao3py.resetArchiveBaseUrl()
+        ao3fetch.resetFetcher()
+        ao3fetch.resetArchiveBaseUrl()
 
     assert code == 0
     storyDir = storiesDir / "two-parts"
@@ -262,7 +262,7 @@ def test_import_local_epub_and_error_cases(tmp_path: Path) -> None:
     assert main(["import", str(epubPath), "--stories", str(storiesDir), "--force"]) == 0
 
     # Locked work returns exit code 1.
-    ao3py.setFetcher(
+    ao3fetch.setFetcher(
         _makeRouteFetcher(
             {"https://archiveofourown.org/works/9999?view_full_work=true&view_adult=true": (200, _WORK_LOCKED_HTML)},
         ),
@@ -270,5 +270,5 @@ def test_import_local_epub_and_error_cases(tmp_path: Path) -> None:
     try:
         assert main(["import", "9999", "--stories", str(storiesDir)]) == 1
     finally:
-        ao3py.resetFetcher()
-        ao3py.resetArchiveBaseUrl()
+        ao3fetch.resetFetcher()
+        ao3fetch.resetArchiveBaseUrl()
