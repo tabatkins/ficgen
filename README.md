@@ -4,6 +4,11 @@ An easy-to-use static site generator for personal fiction archives, both online 
 
 See [an example archive](https://tabatkins.github.io/ficgen/) (created by `ficgen init && ficgen build`) to explore how it works! Or check the [docs/ folder](docs/) to see the full project structure, source and built artifacts alike.
 
+> [!NOTE]
+> In addition to using this to host your *own* fics (its original purpose),
+> `ficgen import` makes it easy to create your own personal backup archive,
+> so your favorite fics can be easily available even when AO3 is down. ^_^
+
 ## Installation
 
 Requires Python 3.12+.
