@@ -1,17 +1,19 @@
-"""Tests for the `ficgen new` story scaffolder."""
+"""Tests for the `ficgen init` archive scaffolder and `ficgen new` story scaffolder."""
 
 from __future__ import annotations
 
+import logging
+import re
 from pathlib import Path
 
 import pytest
 
-from ficgen.cli import main
+from ficgen.cli import buildConfigFromArgs, main
 from ficgen.generator import generateSite
 from ficgen.kdlMeta import StoryParseError
 from ficgen.models import SiteConfig
 from ficgen.parser import loadArchive
-from ficgen.scaffolder import InitOptions, initStory
+from ficgen.scaffolder import InitOptions, initSite, initStory
 
 
 def test_init_single_doc_story_defaults_to_draft_and_builds_cleanly(tmp_path: Path) -> None:
@@ -145,3 +147,102 @@ def test_cli_new(tmp_path: Path) -> None:
 
     # Duplicate returns exit code 1.
     assert main(["new", "CLI One Shot", "--stories", str(storiesDir)]) == 1
+
+
+def test_cli_init_scaffolds_empty_folder_and_builds_cleanly(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """`ficgen init` populates an empty folder with site.kdl and example stories that build cleanly."""
+    archiveDir = tmp_path / "my-archive"
+    archiveDir.mkdir()
+    monkeypatch.chdir(archiveDir)
+
+    assert main(["init"]) == 0
+    captured = capsys.readouterr()
+    assert "site.kdl" in captured.out
+    assert "ficgen build" in captured.out
+    assert "ficgen new" in captured.out
+
+    assert (archiveDir / "site.kdl").is_file()
+    oneShotMd = archiveDir / "_stories" / "example-one-shot" / "index.md"
+    storyKdl = archiveDir / "_stories" / "example-multi-chapter" / "story.kdl"
+    ch1Md = archiveDir / "_stories" / "example-multi-chapter" / "ch1.md"
+    ch2Md = archiveDir / "_stories" / "example-multi-chapter" / "ch2.md"
+    assert oneShotMd.is_file()
+    assert storyKdl.is_file()
+    assert ch1Md.is_file()
+    assert ch2Md.is_file()
+
+    # Example stories use placeholder Lorem Ipsum prose and include commented optional metadata.
+    assert "Lorem ipsum" in oneShotMd.read_text(encoding="utf-8")
+    assert "Lorem ipsum" in ch1Md.read_text(encoding="utf-8")
+    assert "// include-drafts false" in (archiveDir / "site.kdl").read_text(encoding="utf-8")
+    assert '// stories "_stories"' in (archiveDir / "site.kdl").read_text(encoding="utf-8")
+    assert "// planned-chapters" in storyKdl.read_text(encoding="utf-8")
+
+    # Running `ficgen build` right away succeeds with zero warnings and generates both stories.
+    with caplog.at_level(logging.WARNING, logger="ficgen"):
+        assert main(["build"]) == 0
+    assert caplog.records == []
+    assert (archiveDir / "index.html").is_file()
+    assert (archiveDir / "example-one-shot" / "index.html").is_file()
+    assert (archiveDir / "example-multi-chapter" / "index.html").is_file()
+    assert (archiveDir / "example-multi-chapter" / "ch1.html").is_file()
+    assert (archiveDir / "example-multi-chapter" / "ch2.html").is_file()
+    assert (archiveDir / "example-multi-chapter" / "all.html").is_file()
+
+
+def test_init_site_rejects_non_empty_directory_and_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`ficgen init` refuses to run in a non-empty directory or on a file path."""
+    nonEmptyDir = tmp_path / "occupied"
+    nonEmptyDir.mkdir()
+    (nonEmptyDir / "existing.txt").write_text("hello", encoding="utf-8")
+
+    monkeypatch.chdir(nonEmptyDir)
+    assert main(["init"]) == 1
+    captured = capsys.readouterr()
+    assert "not empty" in captured.err
+    assert not (nonEmptyDir / "site.kdl").exists()
+    assert not (nonEmptyDir / "_stories").exists()
+
+    # Hidden files also count as non-empty.
+    hiddenDir = tmp_path / "hidden"
+    hiddenDir.mkdir()
+    (hiddenDir / ".keep").write_text("", encoding="utf-8")
+    with pytest.raises(StoryParseError, match="not empty"):
+        initSite(hiddenDir)
+
+    # A path pointing to a regular file fails cleanly.
+    filePath = tmp_path / "not-a-dir"
+    filePath.write_text("x", encoding="utf-8")
+    with pytest.raises(StoryParseError, match="not a directory"):
+        initSite(filePath)
+
+
+def test_init_site_commented_metadata_is_valid_when_uncommented(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every commented-out KDL metadata line in `ficgen init` templates parses cleanly if uncommented."""
+    archiveDir = tmp_path / "uncommented"
+    result = initSite(archiveDir)
+
+    commentRe = re.compile(r"(?m)^// ")
+    for createdPath in result.createdFiles:
+        raw = createdPath.read_text(encoding="utf-8")
+        createdPath.write_text(commentRe.sub("", raw), encoding="utf-8")
+
+    monkeypatch.chdir(archiveDir)
+    config = buildConfigFromArgs(["--drafts"])
+    archive = loadArchive(config)
+    assert len(archive.stories) == 2
+    generateSite(archive)
+    assert (archiveDir / "example-one-shot" / "index.html").is_file()
+    assert (archiveDir / "example-multi-chapter" / "ch2.html").is_file()

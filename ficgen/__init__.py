@@ -33,6 +33,8 @@ from .parser import (
 from .scaffolder import (
     InitOptions as InitOptions,
     InitResult as InitResult,
+    SiteInitResult as SiteInitResult,
+    initSite as initSite,
     initStory as initStory,
 )
 from .stamper import (
@@ -54,6 +56,7 @@ __all__ = [
     "InitResult",
     "MarkdownRenderer",
     "SiteConfig",
+    "SiteInitResult",
     "StampEntry",
     "StampResult",
     "Story",
@@ -64,6 +67,7 @@ __all__ = [
     "generateSite",
     "htmlToMarkdown",
     "importFromSource",
+    "initSite",
     "initStory",
     "loadArchive",
     "main",

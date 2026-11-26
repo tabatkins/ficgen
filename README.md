@@ -26,7 +26,18 @@ pip install -r requirements-dev.txt
 
 ## 1. The `ficgen` Command
 
-`ficgen` (also runnable as `python -m ficgen`) has four subcommands: `build` (the default when no subcommand is given), `new`, `import`, and `stamp`.
+`ficgen` (also runnable as `python -m ficgen`) has five subcommands: `build` (the default when no subcommand is given), `init`, `new`, `import`, and `stamp`.
+
+### Initializing a New Archive (`ficgen init`)
+
+Scaffolds a brand-new archive in an empty directory (defaulting to the current directory) with a starter `site.kdl` and example one-shot and multi-chapter stories under `_stories/`:
+
+```sh
+ficgen init                     # initialize the current empty directory
+ficgen init path/to/my-archive  # create/initialize a new archive directory
+```
+
+`ficgen init` refuses to run if the target directory is not empty. Both `site.kdl` and the example stories come with sensible defaults filled in and optional metadata fields documented as commented-out KDL lines. Once initialized, run `ficgen build` to generate HTML for the examples, and `ficgen new "Your Story Title"` to start your own story.
 
 ### Building the Archive (`ficgen` / `ficgen build`)
 

@@ -10,7 +10,7 @@ import kdl
 
 from . import t
 from .kdlMeta import StoryParseError
-from .models import slugify
+from .models import DEFAULT_STORIES_DIR_NAME, slugify
 from .stamper import defaultTodayDate, validateDateString
 
 _SAFE_SLUG_RE: t.Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -40,6 +40,16 @@ class InitResult:
 
     storyDir: Path
     slug: str
+    createdFiles: tuple[Path, ...]
+
+
+@dataclass(slots=True)
+class SiteInitResult:
+    """Paths created when initializing a new ficgen archive directory."""
+
+    siteDir: Path
+    configPath: Path
+    storiesDir: Path
     createdFiles: tuple[Path, ...]
 
 
@@ -166,3 +176,193 @@ def initStory(options: InitOptions) -> InitResult:
             created.append(chapterPath)
 
     return InitResult(storyDir=storyDir, slug=slug, createdFiles=tuple(created))
+
+
+def _buildDefaultSiteKdl() -> str:
+    """Build a starter site.kdl with sensible defaults and commented optional settings."""
+    return (
+        'title "My Fiction Archive"\n'
+        + 'subtitle "Original fiction and fanworks."\n'
+        + 'author "Your Name"\n'
+        + 'base-url "https://example.com/"\n'
+        + f'// stories "{DEFAULT_STORIES_DIR_NAME}"\n'
+        + "// include-drafts false\n"
+    )
+
+
+def _buildExampleOneShotMd(todayDate: str) -> str:
+    """Build an example single-document story with Lorem Ipsum prose and commented optional metadata."""
+    dateLit = _formatKdlString(todayDate)
+    return (
+        "# Example One-Shot\n\n"
+        + "```metadata\n"
+        + 'fandoms "Original Work"\n'
+        + 'categories "Gen"\n'
+        + 'characters "Character A" "Character B"\n'
+        + 'relationships "Character A & Character B"\n'
+        + 'tags "Example" "One-Shot"\n'
+        + f"date {dateLit}\n"
+        + '// title "Example One-Shot"\n'
+        + '// author "Your Name"\n'
+        + '// rating "General Audiences"\n'
+        + '// warnings "No Archive Warnings Apply"\n'
+        + '// summary "Optional inline summary (or use a <summary> block below)."\n'
+        + '// notes "Optional top notes (or use a <notes> block below)."\n'
+        + '// endnotes "Optional end notes (or use an <endnotes> block below)."\n'
+        + f"// updated {dateLit}\n"
+        + "// published false\n"
+        + "// complete true\n"
+        + "```\n\n"
+        + "<summary>\n"
+        + "Lorem ipsum dolor sit amet, consectetur adipiscing elit. "
+        + "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\n"
+        + "</summary>\n\n"
+        + "<notes>\n"
+        + "Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut "
+        + "aliquip ex ea commodo consequat.\n"
+        + "</notes>\n\n"
+        + "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor "
+        + "incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud "
+        + "exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.\n\n"
+        + "|Lorem ipsum?>\n\n"
+        + "<Dolor!|\n\n"
+        + "|sit amet...>\n\n"
+        + "Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu "
+        + "fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in "
+        + "culpa qui officia deserunt mollit anim id est laborum.\n\n"
+        + "---\n\n"
+        + "Curabitur pretium tincidunt lacus. Nulla gravida orci a odio. Nullam varius, "
+        + "turpis et commodo pharetra, est eros bibendum elit, nec luctus magna felis "
+        + "sollicitudin mauris.\n"
+    )
+
+
+def _buildExampleMultiStoryKdl(todayDate: str) -> str:
+    """Build an example multi-chapter story.kdl with defaults and commented optional metadata."""
+    dateLit = _formatKdlString(todayDate)
+    return (
+        'title "Example Multi-Chapter Story"\n'
+        + 'fandoms "Original Work"\n'
+        + 'categories "F/F"\n'
+        + 'characters "Character C" "Character D"\n'
+        + 'relationships "Character C/Character D"\n'
+        + 'tags "Example" "Multi-Chapter"\n'
+        + 'summary "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio. Praesent libero."\n'
+        + '// author "Your Name"\n'
+        + '// rating "Teen And Up Audiences"\n'
+        + '// warnings "No Archive Warnings Apply"\n'
+        + '// notes "Optional work-level top notes."\n'
+        + '// endnotes "Optional work-level end notes."\n'
+        + f"// date {dateLit}\n"
+        + f"// updated {dateLit}\n"
+        + "// published false\n"
+        + "// complete false\n"
+        + "// planned-chapters 3\n"
+    )
+
+
+def _buildExampleChapterOneMd(todayDate: str) -> str:
+    """Build chapter 1 of the example multi-chapter story."""
+    dateLit = _formatKdlString(todayDate)
+    return (
+        "# Lorem Ipsum\n\n"
+        + "```metadata\n"
+        + "chapter 1\n"
+        + f"date {dateLit}\n"
+        + '// title "Lorem Ipsum"\n'
+        + "// published false\n"
+        + '// summary "Optional chapter summary (or use a <summary> block)."\n'
+        + '// notes "Optional chapter top notes (or use a <notes> block)."\n'
+        + '// endnotes "Optional chapter end notes (or use an <endnotes> block)."\n'
+        + '// fandoms "Chapter-Specific Fandom"\n'
+        + '// categories "Gen"\n'
+        + '// characters "Extra Character"\n'
+        + '// relationships "Extra Character/Another Character"\n'
+        + '// tags "Chapter-Specific Tag"\n'
+        + "```\n\n"
+        + "<notes>\n"
+        + "Sed cursus ante dapibus diam. Sed nisi. Nulla quis sem at nibh elementum imperdiet.\n"
+        + "</notes>\n\n"
+        + "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio. "
+        + "Praesent libero. Sed cursus ante dapibus diam. Sed nisi. Nulla quis sem at nibh "
+        + "elementum imperdiet.\n\n"
+        + "Duis sagittis ipsum. Praesent mauris. Fusce nec tellus sed augue semper porta. "
+        + "Mauris massa. Vestibulum lacinia arcu eget nulla.\n"
+    )
+
+
+def _buildExampleChapterTwoMd(todayDate: str) -> str:
+    """Build chapter 2 of the example multi-chapter story."""
+    dateLit = _formatKdlString(todayDate)
+    return (
+        "# Dolor Sit Amet\n\n"
+        + "```metadata\n"
+        + "chapter 2\n"
+        + f"date {dateLit}\n"
+        + '// title "Dolor Sit Amet"\n'
+        + "// published false\n"
+        + '// summary "Optional chapter summary (or use a <summary> block)."\n'
+        + '// notes "Optional chapter top notes (or use a <notes> block)."\n'
+        + '// endnotes "Optional chapter end notes (or use an <endnotes> block)."\n'
+        + '// fandoms "Chapter-Specific Fandom"\n'
+        + '// categories "Gen"\n'
+        + '// characters "Extra Character"\n'
+        + '// relationships "Extra Character/Another Character"\n'
+        + '// tags "Chapter-Specific Tag"\n'
+        + "```\n\n"
+        + "<endnotes>\n"
+        + "Class aptent taciti sociosqu ad litora torquent per conubia nostra, per inceptos himenaeos.\n"
+        + "</endnotes>\n\n"
+        + "Class aptent taciti sociosqu ad litora torquent per conubia nostra, per inceptos "
+        + "himenaeos. Curabitur sodales ligula in libero. Sed dignissim lacinia nunc.\n\n"
+        + "Curabitur tortor. Pellentesque nibh. Aenean quam. In scelerisque sem at dolor. "
+        + "Maecenas mattis. Sed convallis tristique sem.\n"
+    )
+
+
+def initSite(targetDir: Path) -> SiteInitResult:
+    """Initialize a brand-new ficgen archive in an empty directory with site.kdl and example stories."""
+    if targetDir.exists():
+        if not targetDir.is_dir():
+            msg = f"Cannot initialize ficgen archive: path exists and is not a directory: {targetDir}"
+            raise StoryParseError(msg)
+        if any(targetDir.iterdir()):
+            msg = f"Cannot initialize ficgen archive: directory is not empty: {targetDir}"
+            raise StoryParseError(msg)
+    else:
+        targetDir.mkdir(parents=True, exist_ok=False)
+
+    todayDate = defaultTodayDate()
+    created: list[Path] = []
+
+    configPath = targetDir / "site.kdl"
+    configPath.write_text(_buildDefaultSiteKdl(), encoding="utf-8")
+    created.append(configPath)
+
+    storiesDir = targetDir / DEFAULT_STORIES_DIR_NAME
+    oneShotDir = storiesDir / "example-one-shot"
+    oneShotDir.mkdir(parents=True, exist_ok=False)
+    oneShotPath = oneShotDir / "index.md"
+    oneShotPath.write_text(_buildExampleOneShotMd(todayDate), encoding="utf-8")
+    created.append(oneShotPath)
+
+    multiDir = storiesDir / "example-multi-chapter"
+    multiDir.mkdir(parents=True, exist_ok=False)
+    storyKdlPath = multiDir / "story.kdl"
+    storyKdlPath.write_text(_buildExampleMultiStoryKdl(todayDate), encoding="utf-8")
+    created.append(storyKdlPath)
+
+    ch1Path = multiDir / "ch1.md"
+    ch1Path.write_text(_buildExampleChapterOneMd(todayDate), encoding="utf-8")
+    created.append(ch1Path)
+
+    ch2Path = multiDir / "ch2.md"
+    ch2Path.write_text(_buildExampleChapterTwoMd(todayDate), encoding="utf-8")
+    created.append(ch2Path)
+
+    return SiteInitResult(
+        siteDir=targetDir,
+        configPath=configPath,
+        storiesDir=storiesDir,
+        createdFiles=tuple(created),
+    )

@@ -16,7 +16,7 @@ from .importer import ImportOptions, importFromSource
 from .kdlMeta import StoryParseError, getBoolField, getStringField, parseKdlDocument
 from .models import DEFAULT_STORIES_DIR_NAME, SiteConfig
 from .parser import loadArchive
-from .scaffolder import InitOptions, initStory
+from .scaffolder import InitOptions, initSite, initStory
 from .stamper import StampResult, defaultTodayDate, stampStories
 
 
@@ -90,6 +90,7 @@ def _buildArgParser(defaultStories: Path, defaultOutput: Path) -> argparse.Argum
         epilog=(
             "Subcommands:\n"
             + "  ficgen [build] [options]        Build the static HTML archive (default)\n"
+            + "  ficgen init [DIR]               Initialize a new archive with site.kdl and example stories\n"
             + "  ficgen new TITLE [options]      Initialize a new story directory\n"
             + "  ficgen import SOURCE [options]  Import stories from AO3-compatible archives or EPUBs\n"
             + "  ficgen stamp [options]          Stamp date into undated story/chapter KDL metadata blocks"
@@ -196,6 +197,22 @@ def _stampArgParser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Show which files would be stamped without modifying them.",
+    )
+    return parser
+
+
+def _initArgParser() -> argparse.ArgumentParser:
+    """Create the CLI argument parser for the `init` subcommand."""
+    parser = argparse.ArgumentParser(
+        prog="ficgen init",
+        description="Initialize a brand-new ficgen archive in an empty directory with site.kdl and example stories.",
+    )
+    parser.add_argument(
+        "directory",
+        nargs="?",
+        type=Path,
+        default=None,
+        help="Target empty directory to initialize (default: current working directory).",
     )
     return parser
 
@@ -435,6 +452,24 @@ def _runStamp(argv: t.Sequence[str]) -> int:
     return 0
 
 
+def _runInit(argv: t.Sequence[str]) -> int:
+    """Execute the `ficgen init` subcommand."""
+    parser = _initArgParser()
+    args = parser.parse_args(argv)
+    targetDir: Path = args.directory if args.directory is not None else Path.cwd()
+    result = initSite(targetDir)
+    print(f"Initialized a new ficgen archive in {result.siteDir}:")
+    for createdPath in result.createdFiles:
+        print(f"  {createdPath.relative_to(result.siteDir)}")
+    print("")
+    print("Next steps:")
+    print("  - Edit site.kdl with your archive's title, author, and base URL.")
+    print("  - Run `ficgen build` to create the HTML for the example stories.")
+    print("  - Look at the example source and output, and delete the sources when you're ready.")
+    print('  - Run `ficgen new "Your Story Title"` to start your own new story.')
+    return 0
+
+
 def _runNew(argv: t.Sequence[str]) -> int:
     """Execute the `ficgen new` subcommand."""
     parser = _newArgParser()
@@ -544,6 +579,8 @@ def main(argv: t.Sequence[str] | None = None) -> int:
     try:
         if rawArgs and rawArgs[0] == "stamp":
             return _runStamp(rawArgs[1:])
+        if rawArgs and rawArgs[0] == "init":
+            return _runInit(rawArgs[1:])
         if rawArgs and rawArgs[0] == "new":
             return _runNew(rawArgs[1:])
         if rawArgs and rawArgs[0] == "import":
