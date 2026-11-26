@@ -2,7 +2,7 @@
 
 An easy-to-use static site generator for personal fiction archives, both online and offline. (No comments or kudos, just text.) Reads Markdown story documents and KDL metadata (`kdl-py`) from a `_stories/` directory and outputs clean, literary static HTML, CSS (with light/dark mode), static taxonomy browse pages, and an Atom 1.0 feed.
 
-See [an example archive](example/) (created by `ficgen init && ficgen build`) to explore how it works!
+See [an example archive](docs/) (created by `ficgen init && ficgen build`) to explore how it works!
 
 ## Installation
 
