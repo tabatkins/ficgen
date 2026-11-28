@@ -1017,7 +1017,7 @@ def test_relationship_implied_characters_render_everywhere(tmp_path: Path) -> No
         "# Orbit\n\n"
         + "```metadata\n"
         + 'fandoms "Original Work"\n'
-        + 'relationships "Nadia/Kira" "Kira & Echo"\n'
+        + 'relationships "Nadia/Kira" "Kira & Echo" "Echo~Sol" "Sol vs. Vex"\n'
         + 'date "2026-10-10"\n'
         + "```\n\n"
         + "Stars drifted past the viewport.\n",
@@ -1035,7 +1035,13 @@ def test_relationship_implied_characters_render_everywhere(tmp_path: Path) -> No
     feedXml = (outDir / "feed.xml").read_text(encoding="utf-8")
 
     assert "<dt>Characters</dt>" in storyHtml
-    for name, slug in (("Nadia", "nadia"), ("Kira", "kira"), ("Echo", "echo")):
+    for name, slug in (
+        ("Nadia", "nadia"),
+        ("Kira", "kira"),
+        ("Echo", "echo"),
+        ("Sol", "sol"),
+        ("Vex", "vex"),
+    ):
         assert f'href="browse/characters/{slug}.html">{name}</a>' in indexHtml
         assert f'href="../browse/characters/{slug}.html">{name}</a>' in storyHtml
         assert f'href="characters/{slug}.html"' in browseHtml

@@ -314,14 +314,29 @@ def test_nsfw_metadata_on_work_chapter_and_section(tmp_path: Path) -> None:
 
 
 def test_extract_relationship_characters() -> None:
-    """Relationship tags split on `/` and `&`, deduplicate case-insensitively, and ignore non-relationships."""
+    """Relationship tags split on `/`, `&`, `~`, and `vs`/`vs.`, deduplicate, and ignore non-relationships."""
     assert extractRelationshipCharacters(["Elena/Sora"]) == ("Elena", "Sora")
     assert extractRelationshipCharacters(["Character A & Character B"]) == ("Character A", "Character B")
+    assert extractRelationshipCharacters(["Alice~Bob"]) == ("Alice", "Bob")
+    assert extractRelationshipCharacters(["Alice ~ Bob ~ Carol"]) == ("Alice", "Bob", "Carol")
+    assert extractRelationshipCharacters(["Alice vs Bob"]) == ("Alice", "Bob")
+    assert extractRelationshipCharacters(["Alice vs. Bob"]) == ("Alice", "Bob")
+    assert extractRelationshipCharacters(["Alice VS Bob Vs. Carol"]) == ("Alice", "Bob", "Carol")
     assert extractRelationshipCharacters(["Alice / Bob / Carol"]) == ("Alice", "Bob", "Carol")
-    assert extractRelationshipCharacters(["Alice&Bob & Carol/Dana"]) == ("Alice", "Bob", "Carol", "Dana")
+    assert extractRelationshipCharacters(["Alice&Bob ~ Carol/Dana vs. Eve"]) == ("Alice", "Bob", "Carol", "Dana", "Eve")
+    assert extractRelationshipCharacters(["Jeeves/Vesper"]) == ("Jeeves", "Vesper")
     assert extractRelationshipCharacters(["Loki/Loki"]) == ("Loki",)
-    assert extractRelationshipCharacters(["Alice/Bob", "bob & Carol"]) == ("Alice", "Bob", "Carol")
-    assert not extractRelationshipCharacters(["Gen", "None", "Alice/", "/Alice", "/", " & ", ""])
+    assert extractRelationshipCharacters(["Alice vs. Alice"]) == ("Alice",)
+    assert extractRelationshipCharacters(["Alice/Bob", "bob & Carol", "carol~Dana", "dana vs Eve"]) == (
+        "Alice",
+        "Bob",
+        "Carol",
+        "Dana",
+        "Eve",
+    )
+    assert not extractRelationshipCharacters(
+        ["Gen", "None", "Alice/", "/Alice", "/", " & ", "~", "Alice~", "Alice vs", "Alice vs.", "vs Bob", ""],
+    )
 
 
 def test_relationship_tags_imply_character_tags(tmp_path: Path) -> None:

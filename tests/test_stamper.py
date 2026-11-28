@@ -207,11 +207,15 @@ def test_stamp_document_and_kdl_add_relationship_implied_characters() -> None:
     assert changedSingular is True
     assert updatedSingular == 'character "Zara"\ncharacter "Nadia"\ncharacter "Kira"\nrelationships "Nadia/Kira"\n'
 
-    # No characters line yet appends a new `characters` line; non-relationships do nothing.
-    noCharsKdl = 'title "Solo"\nrelationships "Alice/Bob" "Gen"\n'
+    # No characters line yet appends a new `characters` line; QPR (~) and rivalry (vs / vs.) work too.
+    noCharsKdl = 'title "Solo"\nrelationships "Alice/Bob" "Bob~Carol" "Carol vs Dana" "Dana vs. Eve" "Gen"\n'
     updatedNoChars, changedNoChars = stampKdlText(noCharsKdl)
     assert changedNoChars is True
-    assert updatedNoChars == 'title "Solo"\nrelationships "Alice/Bob" "Gen"\ncharacters "Alice" "Bob"\n'
+    assert updatedNoChars == (
+        'title "Solo"\n'
+        + 'relationships "Alice/Bob" "Bob~Carol" "Carol vs Dana" "Dana vs. Eve" "Gen"\n'
+        + 'characters "Alice" "Bob" "Carol" "Dana" "Eve"\n'
+    )
     assert stampKdlText('title "Gen"\nrelationships "Gen"\n') == ('title "Gen"\nrelationships "Gen"\n', False)
 
 

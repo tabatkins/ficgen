@@ -48,7 +48,7 @@ _SPECIAL_TAG_RE: t.Final[re.Pattern[str]] = re.compile(
 )
 _CHAPTER_FILE_RE: t.Final[re.Pattern[str]] = re.compile(r"^ch(\d+)\.md$", re.IGNORECASE)
 _NATURAL_SPLIT_RE: t.Final[re.Pattern[str]] = re.compile(r"(\d+)")
-_RELATIONSHIP_SEP_RE: t.Final[re.Pattern[str]] = re.compile(r"[/&]")
+_RELATIONSHIP_SEP_RE: t.Final[re.Pattern[str]] = re.compile(r"[/&~]|\s+vs\.?(?=\s)", re.IGNORECASE)
 _STORY_KDL_NAMES: t.Final[tuple[str, ...]] = ("story.kdl", "meta.kdl", "index.kdl")
 
 _NOTES_KEYS: t.Final[tuple[str, ...]] = ("notes", "startnotes", "beginnotes")
@@ -299,7 +299,7 @@ def parseMarkdownDocument(rawText: str, sourceDesc: str = "<markdown>") -> Parse
 
 
 def extractRelationshipCharacters(relationships: t.Iterable[str]) -> t.MetadataList:
-    """Extract implied character names from relationship tags split on `/` and `&`."""
+    """Extract implied character names from relationship tags split on `/`, `&`, `~`, and `vs`/`vs.`."""
     extracted: list[str] = []
     for relationship in relationships:
         parts = [part.strip() for part in _RELATIONSHIP_SEP_RE.split(relationship) if part.strip()]
