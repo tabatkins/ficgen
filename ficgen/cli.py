@@ -18,7 +18,7 @@ from .kdlMeta import StoryParseError
 from .models import SiteConfig
 from .parser import loadArchive
 from .scaffolder import InitOptions, initSite, initStory
-from .stamper import StampResult, defaultTodayDate, stampStories
+from .stamper import StampEntry, StampResult, defaultTodayDate, stampStories
 
 
 def _addStoriesAndConfigArgs(
@@ -53,7 +53,7 @@ def _buildArgParser(defaultStories: Path, defaultOutput: Path) -> argparse.Argum
             + "  ficgen init [DIR]               Initialize a new archive with site.kdl and example stories\n"
             + "  ficgen new TITLE [options]      Initialize a new story directory\n"
             + "  ficgen import SOURCE [options]  Import stories from AO3-compatible archives or EPUBs\n"
-            + "  ficgen stamp [options]          Stamp date into undated story/chapter KDL metadata blocks"
+            + "  ficgen stamp [options]          Stamp date and implied characters into KDL metadata blocks"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -102,7 +102,10 @@ def _stampArgParser() -> argparse.ArgumentParser:
     defaultStories, _ = resolveDefaultPaths()
     parser = argparse.ArgumentParser(
         prog="ficgen stamp",
-        description='Stamp `date "YYYY-MM-DD"` into KDL metadata blocks of undated story and chapter files.',
+        description=(
+            'Stamp `date "YYYY-MM-DD"` and relationship-implied `characters` '
+            + "into KDL metadata blocks of story and chapter files."
+        ),
     )
     parser.add_argument(
         "targets",
@@ -116,6 +119,12 @@ def _stampArgParser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         help="ISO-8601 date to stamp (default: today's date, YYYY-MM-DD).",
+    )
+    parser.add_argument(
+        "--characters",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Also add characters implied by relationship tags (default: enabled; pass --no-characters to disable).",
     )
     parser.add_argument(
         "--force",
@@ -284,23 +293,34 @@ def buildArchive(config: SiteConfig) -> BuildResult:
     return generateSite(archive)
 
 
+def _formatStampDetails(entry: StampEntry) -> str:
+    """Format the stamped date and/or added characters for CLI display."""
+    parts: list[str] = []
+    if entry.stampedDate:
+        parts.append(entry.dateValue)
+    if entry.addedCharacters:
+        chars = ", ".join(entry.addedCharacters)
+        parts.append(f"characters ({chars})")
+    return ", ".join(parts) if parts else entry.dateValue
+
+
 def _printStampSummary(result: StampResult) -> None:
     """Print per-file actions and a concise summary for `ficgen stamp`."""
     for entry in result.entries:
         match entry.action:
             case "stamped":
-                print(f"Stamped {entry.dateValue}: {entry.path}")
+                print(f"Stamped {_formatStampDetails(entry)}: {entry.path}")
             case "would_stamp":
-                print(f"Would stamp {entry.dateValue}: {entry.path}")
+                print(f"Would stamp {_formatStampDetails(entry)}: {entry.path}")
             case "skipped_existing":
-                print(f"Skipped (already dated): {entry.path}")
+                print(f"Skipped (up to date): {entry.path}")
             case "skipped_draft":
                 print(f"Skipped (draft): {entry.path}")
 
     verb = "Would stamp" if result.dryRun else "Stamped"
     print(
         f"{verb} {result.stampedCount} file(s)"
-        + f" ({result.skippedExistingCount} already dated, {result.skippedDraftCount} draft(s) skipped).",
+        + f" ({result.skippedExistingCount} up to date, {result.skippedDraftCount} draft(s) skipped).",
     )
 
 
@@ -316,6 +336,7 @@ def _runStamp(argv: t.Sequence[str]) -> int:
         force=bool(args.force),
         includeDrafts=bool(args.drafts),
         dryRun=bool(args.dry_run),
+        stampCharacters=bool(args.characters),
     )
     _printStampSummary(result)
     return 0

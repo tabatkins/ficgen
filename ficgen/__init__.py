@@ -44,6 +44,7 @@ from .stamper import (
     StampResult as StampResult,
     stampDocumentText as stampDocumentText,
     stampFile as stampFile,
+    stampKdlText as stampKdlText,
     stampStories as stampStories,
 )
 
@@ -81,6 +82,7 @@ __all__ = [
     "slugify",
     "stampDocumentText",
     "stampFile",
+    "stampKdlText",
     "stampStories",
     "writeImportedWork",
 ]

@@ -1006,3 +1006,40 @@ def test_build_rejects_story_slug_conflicting_with_generated_site_paths(
     assert main(["build", "--stories", str(draftStories), "--output", str(draftOut)]) == 1
     assert "reserved site output path" in capsys.readouterr().err
     assert not draftOut.exists()
+
+
+def test_relationship_implied_characters_render_everywhere(tmp_path: Path) -> None:
+    """Characters implied by relationship tags appear in cards, meta blocks, browse pages, and Atom feed."""
+    storiesDir = tmp_path / "_stories"
+    storyDir = storiesDir / "orbit"
+    storyDir.mkdir(parents=True)
+    (storyDir / "index.md").write_text(
+        "# Orbit\n\n"
+        + "```metadata\n"
+        + 'fandoms "Original Work"\n'
+        + 'relationships "Nadia/Kira" "Kira & Echo"\n'
+        + 'date "2026-10-10"\n'
+        + "```\n\n"
+        + "Stars drifted past the viewport.\n",
+        encoding="utf-8",
+    )
+
+    outDir = tmp_path / "out"
+    archive = loadArchive(SiteConfig(storiesDir=storiesDir, outputDir=outDir))
+    generateSite(archive)
+    _assertAllInternalLinksResolve(outDir)
+
+    indexHtml = (outDir / "index.html").read_text(encoding="utf-8")
+    storyHtml = (outDir / "orbit" / "index.html").read_text(encoding="utf-8")
+    browseHtml = (outDir / "browse" / "index.html").read_text(encoding="utf-8")
+    feedXml = (outDir / "feed.xml").read_text(encoding="utf-8")
+
+    assert "<dt>Characters</dt>" in storyHtml
+    for name, slug in (("Nadia", "nadia"), ("Kira", "kira"), ("Echo", "echo")):
+        assert f'href="browse/characters/{slug}.html">{name}</a>' in indexHtml
+        assert f'href="../browse/characters/{slug}.html">{name}</a>' in storyHtml
+        assert f'href="characters/{slug}.html"' in browseHtml
+        assert f'<category term="{name}" label="{name}"/>' in feedXml
+        charPage = outDir / "browse" / "characters" / f"{slug}.html"
+        assert charPage.is_file()
+        assert "Orbit" in charPage.read_text(encoding="utf-8")

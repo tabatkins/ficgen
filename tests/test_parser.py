@@ -8,7 +8,7 @@ import pytest
 
 from ficgen.kdlMeta import getListField, getStringField
 from ficgen.models import SiteConfig, buildSlugMap, slugify
-from ficgen.parser import StoryParseError, loadArchive, parseMarkdownDocument
+from ficgen.parser import StoryParseError, extractRelationshipCharacters, loadArchive, parseMarkdownDocument
 
 
 def test_parse_document_extracts_title_kdl_metadata_and_notes() -> None:
@@ -311,3 +311,75 @@ def test_nsfw_metadata_on_work_chapter_and_section(tmp_path: Path) -> None:
     (bad / "index.md").write_text("# Bad\n\n```metadata\nnsfw 123\n```\n\nBody.\n", encoding="utf-8")
     with pytest.raises(StoryParseError, match="nsfw"):
         loadArchive(SiteConfig(storiesDir=tmp_path, outputDir=tmp_path / "out"))
+
+
+def test_extract_relationship_characters() -> None:
+    """Relationship tags split on `/` and `&`, deduplicate case-insensitively, and ignore non-relationships."""
+    assert extractRelationshipCharacters(["Elena/Sora"]) == ("Elena", "Sora")
+    assert extractRelationshipCharacters(["Character A & Character B"]) == ("Character A", "Character B")
+    assert extractRelationshipCharacters(["Alice / Bob / Carol"]) == ("Alice", "Bob", "Carol")
+    assert extractRelationshipCharacters(["Alice&Bob & Carol/Dana"]) == ("Alice", "Bob", "Carol", "Dana")
+    assert extractRelationshipCharacters(["Loki/Loki"]) == ("Loki",)
+    assert extractRelationshipCharacters(["Alice/Bob", "bob & Carol"]) == ("Alice", "Bob", "Carol")
+    assert not extractRelationshipCharacters(["Gen", "None", "Alice/", "/Alice", "/", " & ", ""])
+
+
+def test_relationship_tags_imply_character_tags(tmp_path: Path) -> None:
+    """Relationships imply deduplicated character tags for one-shots, chapters, drafts, and cross-story buckets."""
+    oneShot = tmp_path / "ships-only"
+    oneShot.mkdir()
+    (oneShot / "index.md").write_text(
+        "# Ships Only\n\n"
+        + "```metadata\n"
+        + 'relationships "Elena/Sora" "Sora & Maya" "Alice/Bob/Carol" "Gen"\n'
+        + 'date "2026-10-01"\n'
+        + "```\n\n"
+        + "Body.\n",
+        encoding="utf-8",
+    )
+
+    explicit = tmp_path / "explicit-casing"
+    explicit.mkdir()
+    (explicit / "index.md").write_text(
+        "# Explicit Casing\n\n"
+        + "```metadata\n"
+        + 'characters "Zara" "elena"\n'
+        + 'relationships "Elena/Nadia"\n'
+        + 'date "2026-10-02"\n'
+        + "```\n\n"
+        + "Body.\n",
+        encoding="utf-8",
+    )
+
+    multi = tmp_path / "multi-ships"
+    multi.mkdir()
+    (multi / "story.kdl").write_text(
+        'title "Multi Ships"\n' + 'relationships "Nadia/Kira"\n',
+        encoding="utf-8",
+    )
+    (multi / "ch1.md").write_text(
+        '```metadata\nchapter 1\ndate "2026-10-03"\nrelationships "Kira & Echo"\n```\n\nCh1.\n',
+        encoding="utf-8",
+    )
+    (multi / "ch2.md").write_text(
+        '```metadata\nchapter 2\npublished false\nrelationships "Secret/Spoiler"\n```\n\nCh2.\n',
+        encoding="utf-8",
+    )
+
+    pubArchive = loadArchive(SiteConfig(storiesDir=tmp_path, outputDir=tmp_path / "out", includeDrafts=False))
+    bySlug = {story.slug: story for story in pubArchive.stories}
+
+    assert bySlug["ships-only"].characters == ("Elena", "Sora", "Maya", "Alice", "Bob", "Carol")
+    assert bySlug["explicit-casing"].characters == ("Zara", "elena", "Nadia")
+    assert bySlug["multi-ships"].characters == ("Nadia", "Kira", "Echo")
+
+    # Cross-story bucket merges explicit "elena" and implied "Elena", and merges implied "Nadia" across stories.
+    charBuckets = {bucket.item.name.lower(): bucket for bucket in pubArchive.taxonomies["characters"]}
+    assert {story.slug for story in charBuckets["elena"].stories} == {"ships-only", "explicit-casing"}
+    assert {story.slug for story in charBuckets["nadia"].stories} == {"explicit-casing", "multi-ships"}
+    assert "secret" not in charBuckets
+    assert "gen" not in charBuckets
+
+    draftArchive = loadArchive(SiteConfig(storiesDir=tmp_path, outputDir=tmp_path / "out", includeDrafts=True))
+    draftMulti = next(story for story in draftArchive.stories if story.slug == "multi-ships")
+    assert draftMulti.characters == ("Nadia", "Kira", "Echo", "Secret", "Spoiler")

@@ -175,14 +175,15 @@ Import behavior:
 - Writes single-chapter works to `index.md` and multi-chapter works to `story.kdl` + `ch1.md`, `ch2.md`, ..., pulling per-chapter publication dates from `/works/<id>/navigate` when available.
 - Automatically detects NSFW-indicating AO3 ratings (`Explicit`, `Mature`, `Not Rated`), archive warnings (`Rape/Non-Con`, `Underage Sex`, `Graphic Depictions Of Violence`), additional tags, and per-chapter NSFW markers in chapter titles/summaries/start notes, adding `nsfw true` accordingly (customizable via `import-nsfw` in `site.kdl`).
 
-### Stamping Publication Dates (`ficgen stamp`)
+### Stamping Dates & Implied Characters (`ficgen stamp`)
 
-Inserts `date "YYYY-MM-DD"` into the KDL metadata blocks of undated story/chapter source files:
+Inserts `date "YYYY-MM-DD"` into undated story/chapter source files and adds any `characters` implied by `relationships` tags into story/chapter KDL metadata blocks:
 
 ```sh
 ficgen stamp --dry-run                          # preview which files would be modified
-ficgen stamp                                    # stamp all published, undated stories/chapters with today's date
-ficgen stamp starlight-drift --date 2026-10-12  # stamp a specific story slug, directory, or .md file
+ficgen stamp                                    # stamp dates and implied characters on all published stories
+ficgen stamp --no-characters                    # stamp dates only (skip adding relationship-implied characters)
+ficgen stamp starlight-drift --date 2026-10-12  # stamp a specific story slug, directory, or file
 ficgen stamp _stories/midnight-rain/index.md --date 2026-08-03
 ficgen stamp --force --date 2026-10-12          # overwrite existing date entries
 ficgen stamp --drafts                           # also stamp files marked published false
@@ -190,9 +191,10 @@ ficgen stamp --drafts                           # also stamp files marked publis
 
 #### Stamp Behavior
 
-- **Targets:** With no positional arguments, scans every story folder in `--stories` (or `site.kdl`'s `stories` directory). Positional arguments accept story slugs (resolved inside the stories directory), directory paths, or individual `.md` files.
-- **Single-doc vs. multi-chapter:** Stamps `index.md` for single-doc stories, and stamps chapter files (`chN.md`) for multi-chapter stories (leaving `story.kdl` untouched, since story `Published` and `Updated` dates derive automatically from chapter dates).
-- **Idempotent & draft-safe:** Parses KDL with `kdl-py` (so `//` comments and `/-` slashdashed nodes are ignored), skips files that already have a non-empty `date` / `published-date` node (unless `--force` is set), fills `date null` / empty nodes in place, and skips `published false` files (unless `--drafts` is set).
+- **Targets:** With no positional arguments, scans every story folder in `--stories` (or `site.kdl`'s `stories` directory). Positional arguments accept story slugs (resolved inside the stories directory), directory paths, or individual `.md` / `.kdl` files.
+- **Single-doc vs. multi-chapter:** Stamps `date` into `index.md` for single-doc stories and into chapter files (`chN.md`) for multi-chapter stories (never stamping `date` into `story.kdl`, since story `Published` and `Updated` dates derive automatically from chapter dates).
+- **Implied characters (`--characters` / `--no-characters`):** Enabled by default; parses `relationships` tags split on `/` and `&` and adds any missing characters into `characters` in `index.md`, `story.kdl`, and chapter files (skipping characters already listed in `story.kdl` when stamping chapters). Pass `--no-characters` to stamp dates only.
+- **Idempotent & draft-safe:** Parses KDL with `kdl-py` (so `//` comments and `/-` slashdashed nodes are ignored), skips files that already have up-to-date dates and characters (unless `--force` is set for dates), fills `date null` / empty `characters ""` nodes in place, and skips `published false` files (unless `--drafts` is set).
 - **Formatting preservation:** Only modifies the KDL metadata block (or inserts one after `# Title` / at the top if absent), preserving prose, KDL comments, and line endings.
 
 ---
@@ -306,7 +308,7 @@ tags {
 | `author` | — | string (default: `site.kdl` `author`) | Per-story author override. |
 | `fandoms` | `fandom` | list of strings | Fandom tags (indexed under `browse/fandoms/`). |
 | `categories` | `relationship-categories`, `category` | list of strings | e.g. `"F/F"`, `"M/M"`, `"F/M"`, `"Gen"`, `"Multi"`, `"Other"` (`browse/categories/`). |
-| `relationships` | `relationship`, `ships` | list of strings | Ship tags (`browse/relationships/`). |
+| `relationships` | `relationship`, `ships` | list of strings | Ship tags (`browse/relationships/`). Tags split on `/` or `&` (e.g. `"A/B"`, `"A & B"`, `"A/B/C"`) automatically imply `characters` tags for each character. |
 | `characters` | `character` | list of strings | Character tags (`browse/characters/`). |
 | `tags` | `tag`, `additional-tags` | list of strings | Freeform tags (`browse/tags/`). |
 | `rating` | — | string | Optional rating label shown in the story metadata block. |

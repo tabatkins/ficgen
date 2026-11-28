@@ -48,6 +48,7 @@ _SPECIAL_TAG_RE: t.Final[re.Pattern[str]] = re.compile(
 )
 _CHAPTER_FILE_RE: t.Final[re.Pattern[str]] = re.compile(r"^ch(\d+)\.md$", re.IGNORECASE)
 _NATURAL_SPLIT_RE: t.Final[re.Pattern[str]] = re.compile(r"(\d+)")
+_RELATIONSHIP_SEP_RE: t.Final[re.Pattern[str]] = re.compile(r"[/&]")
 _STORY_KDL_NAMES: t.Final[tuple[str, ...]] = ("story.kdl", "meta.kdl", "index.kdl")
 
 _NOTES_KEYS: t.Final[tuple[str, ...]] = ("notes", "startnotes", "beginnotes")
@@ -297,12 +298,24 @@ def parseMarkdownDocument(rawText: str, sourceDesc: str = "<markdown>") -> Parse
     )
 
 
+def extractRelationshipCharacters(relationships: t.Iterable[str]) -> t.MetadataList:
+    """Extract implied character names from relationship tags split on `/` and `&`."""
+    extracted: list[str] = []
+    for relationship in relationships:
+        parts = [part.strip() for part in _RELATIONSHIP_SEP_RE.split(relationship) if part.strip()]
+        if len(parts) >= 2:
+            extracted.extend(parts)
+    return _mergeLists(tuple(extracted))
+
+
 def _extractTaxonomyFields(
     meta: kdl.Document,
     sourceDesc: str,
 ) -> dict[t.TaxonomyKind, t.MetadataList]:
-    """Extract all five taxonomy tag lists from a KDL metadata document."""
-    return {kind: getListField(meta, *keys, sourceDesc=sourceDesc) for kind, keys in _TAXONOMY_FIELD_KEYS.items()}
+    """Extract all five taxonomy tag lists from a KDL metadata document, implying characters from relationships."""
+    tax = {kind: getListField(meta, *keys, sourceDesc=sourceDesc) for kind, keys in _TAXONOMY_FIELD_KEYS.items()}
+    tax["characters"] = _mergeLists(tax["characters"], extractRelationshipCharacters(tax["relationships"]))
+    return tax
 
 
 def _getNsfwField(doc: kdl.Document, sourceDesc: str) -> tuple[bool, str]:

@@ -85,6 +85,7 @@ def test_init_multi_chapter_story_creates_story_kdl_and_chapters(tmp_path: Path)
     assert story.title == "Starlight Drift"
     assert story.fandoms == ("Alpha", "Beta")
     assert story.relationships == ("A/B",)
+    assert story.characters == ("A", "B")
     assert [ch.number for ch in story.chapters] == [1, 2]
     assert all(ch.published for ch in story.chapters)
     assert all(ch.date.strftime("%Y-%m-%d") == "2026-11-25" for ch in story.chapters)
